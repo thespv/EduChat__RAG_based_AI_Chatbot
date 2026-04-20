@@ -180,10 +180,17 @@ async function fetchNoteFullText(noteId) {
 }
 
 async function loadChatHistory() {
+    newChatMode = true;
+    showWelcomeMessage();
+    
+    const container = document.querySelector('.chat-history-list');
+    if (container) {
+        container.innerHTML = '<li class="chat-history-item new-chat-btn"><span class="menu-icon" style="color: #c8b384;">➕</span> <span class="chat-title-text">New Chat</span></li><li class="chat-history-item loading"><span class="chat-title-text" style="color: #9ca3af; font-size: 0.85rem;">Loading...</span></li>';
+    }
+    
     try {
-        const response = await fetch(API_BASE + '/api/chat/history?user=' + encodeURIComponent(user.name));
+        const response = await fetch(API_BASE + '/api/chat/history?user=' + encodeURIComponent(user.name), { signal: AbortSignal.timeout(5000) });
         const data = await response.json();
-        const container = document.querySelector('.chat-history-list');
         if (!container) return;
         
         container.innerHTML = '<li class="chat-history-item new-chat-btn"><span class="menu-icon" style="color: #c8b384;">➕</span> <span class="chat-title-text">New Chat</span></li>';
@@ -198,58 +205,80 @@ async function loadChatHistory() {
             `).join('');
             currentSessionId = data.sessions[0].id;
             loadSession(currentSessionId);
-        } else {
-            newChatMode = true;
-            showWelcomeMessage();
         }
         
-        container.querySelectorAll('.chat-history-item').forEach(item => {
-            item.addEventListener('click', (e) => {
-                if (e.target.classList.contains('delete-chat')) return;
-                if (item.classList.contains('new-chat-btn')) {
-                    newChat();
-                } else {
-                    loadSession(parseInt(item.dataset.sessionId));
-                }
-            });
-        });
-        
-        container.querySelectorAll('.delete-chat').forEach(btn => {
-            btn.addEventListener('click', async (e) => {
-                e.stopPropagation();
-                const sessionId = parseInt(btn.dataset.deleteId);
-                try {
-                    await fetch(API_BASE + '/api/chat/session/' + sessionId, { method: 'DELETE' });
-                    loadChatHistory();
-                } catch (err) {
-                    console.error('Failed to delete session:', err);
-                }
-            });
-        });
+        setupChatHistoryListeners();
     } catch (e) {
         console.error('Error loading chat history:', e);
+        if (container) {
+            const loadingItem = container.querySelector('.chat-history-item.loading');
+            if (loadingItem) loadingItem.remove();
+        }
     }
 }
 
+function setupChatHistoryListeners() {
+    const container = document.querySelector('.chat-history-list');
+    if (!container) return;
+    
+    container.querySelectorAll('.chat-history-item').forEach(item => {
+        item.addEventListener('click', (e) => {
+            if (e.target.classList.contains('delete-chat')) return;
+            if (item.classList.contains('new-chat-btn')) {
+                newChat();
+            } else {
+                loadSession(parseInt(item.dataset.sessionId));
+            }
+        });
+    });
+    
+    container.querySelectorAll('.delete-chat').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const sessionId = parseInt(btn.dataset.deleteId);
+            try {
+                await fetch(API_BASE + '/api/chat/session/' + sessionId, { method: 'DELETE' });
+                loadChatHistory();
+            } catch (err) {
+                console.error('Failed to delete session:', err);
+            }
+        });
+    });
+}
+
 async function loadSession(sessionId) {
+    const container = document.getElementById('messages-container');
+    const header = container?.querySelector('.bot-header');
+    
+    if (container && header) {
+        container.innerHTML = '';
+        container.appendChild(header);
+        container.innerHTML += '<div class="loading-indicator" style="text-align: center; padding: 40px; color: #9ca3af;">Loading messages...</div>';
+    }
+    
     try {
-        const response = await fetch(API_BASE + '/api/chat/session/' + sessionId);
+        const response = await fetch(API_BASE + '/api/chat/session/' + sessionId, { signal: AbortSignal.timeout(5000) });
         const data = await response.json();
         
         if (data.messages) {
             currentSessionId = sessionId;
             newChatMode = false;
-            const container = document.getElementById('messages-container');
-            const header = container.querySelector('.bot-header');
-            container.innerHTML = '';
-            container.appendChild(header);
-            
-            data.messages.forEach(msg => {
-                addMessage(msg.content, msg.role === 'user');
-            });
+            if (container && header) {
+                container.innerHTML = '';
+                container.appendChild(header);
+                
+                data.messages.forEach(msg => {
+                    addMessage(msg.content, msg.role === 'user');
+                });
+            }
         }
     } catch (e) {
         console.error('Failed to load session:', e);
+        if (container) {
+            container.innerHTML = '';
+            if (header) container.appendChild(header);
+            container.innerHTML += '<div class="empty-message">Failed to load messages. Please try again.</div>';
+        }
     }
 }
 
@@ -264,7 +293,7 @@ async function newChat() {
         const data = await response.json();
         if (data.session_id) {
             currentSessionId = data.session_id;
-            newChatMode = false;
+            newChatMode = true;
             const container = document.getElementById('messages-container');
             const header = container.querySelector('.bot-header');
             container.innerHTML = '';
@@ -393,6 +422,7 @@ document.querySelector('#app').innerHTML = `
                 <button id="sidebar-toggle" class="nav-toggle-btn" title="Toggle Menu">☰</button>
                 <span class="logo-icon-gold">📚</span>
                 <h1 class="logo-text">EduChat <span class="ai-text">AI</span></h1>
+                <button id="search-toggle-mobile" class="nav-toggle-btn mobile-only" title="Toggle Search" style="margin-left: auto; margin-right: 8px;">🔍</button>
             </div>
             <div class="search-section">
                 <div class="search-box">
@@ -402,7 +432,6 @@ document.querySelector('#app').innerHTML = `
                 <div id="search-results" class="search-results"></div>
             </div>
             <div class="user-section">
-                <button id="search-toggle-mobile" class="nav-toggle-btn mobile-only" title="Toggle Search">🔍</button>
                 <div class="user-profile-display" id="user-profile-display" style="cursor: pointer;">
                     <span class="avatar-img">${user.name.charAt(0).toUpperCase()}</span>
                     <span class="user-name">${user.name}</span>
@@ -925,6 +954,7 @@ async function sendMessage() {
                     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: `title=${encodeURIComponent(shortTitle)}`
                 }).then(() => loadChatHistory());
+                isNewChat = false;
             }
         } else if (data.error) {
             addMessage(`Error: ${data.error}`, false);
@@ -1782,6 +1812,6 @@ function displayQuiz(quiz) {
 }
 
 document.addEventListener('DOMContentLoaded', async () => {
-    await loadChatHistory();
     document.getElementById('app').classList.add('loaded');
+    loadChatHistory();
 });
