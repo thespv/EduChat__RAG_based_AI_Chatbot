@@ -623,7 +623,7 @@ const messagesContainer = document.getElementById('messages-container');
 const newChatBtn = document.getElementById('new-chat-btn');
 const summarizeBtn = document.getElementById('summarize-notes-btn');
 
-const MAX_SIZE = 4.5 * 1024 * 1024;
+const MAX_SIZE = 50 * 1024 * 1024;
 
 function handleFileSelect(e) {
     const files = Array.from(e.target.files);
@@ -633,7 +633,7 @@ function handleFileSelect(e) {
     
     files.forEach(file => {
         if (file.size > MAX_SIZE) {
-            fileSizeWarning.innerHTML = '<span class="warning">⚠️ File exceeds 4.5MB limit</span>';
+            fileSizeWarning.innerHTML = '<span class="warning">⚠️ File exceeds 50MB limit</span>';
         }
         
         const icon = getFileIcon(file.name);

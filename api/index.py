@@ -48,7 +48,7 @@ print(f"Index.py - GEMINI_KEY: {GEMINI_KEY[:20] if GEMINI_KEY else 'NOT FOUND'}"
 
 os.environ["GEMINI_API_KEY"] = GEMINI_KEY
 
-MAX_FILE_SIZE = 4.5 * 1024 * 1024
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 @app.post("/api/chat")
 async def chat_endpoint(
@@ -67,7 +67,7 @@ async def chat_endpoint(
                 
                 if len(content) > MAX_FILE_SIZE:
                     return JSONResponse({
-                        "error": f"File '{file.filename}' exceeds 4.5MB limit. Please use smaller files."
+                        "error": f"File '{file.filename}' exceeds 50MB limit. Please use smaller files."
                     }, status_code=413)
                 
                 file_type = file.content_type or "application/octet-stream"

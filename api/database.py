@@ -5,36 +5,21 @@ from pathlib import Path
 from datetime import datetime
 
 # Database path for local SQLite
-DB_PATH = Path("C:/Users/SAURAV/OneDrive/Desktop/EduChat/educhat_history.db")
+DB_PATH = Path("educhat_history.db")
 
-# Supabase PostgreSQL connection
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-
-# PostgreSQL connection (for Supabase)
+# PostgreSQL connection (for Render/Production)
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 pg_conn = None
 
 def get_pg_connection():
     global pg_conn
-    if not SUPABASE_URL or not SUPABASE_KEY:
+    if not DATABASE_URL:
         return None
     
     if pg_conn is None:
         import psycopg2
-        # Parse Supabase connection string
-        # Format: postgresql://postgres:[password]@db.[project].supabase.co:5432/postgres
-        conn_str = SUPABASE_URL.replace("postgres://", "postgresql://postgres:")
-        conn_str = conn_str.replace("@db.", f"@{SUPABASE_KEY.split(':')[0] if ':' in SUPABASE_KEY else ''}@db.")
-        
         try:
-            # Use the direct connection string from Supabase dashboard
-            pg_conn = psycopg2.connect(
-                host=f"db.{SUPABASE_URL.split('//')[1].split('.')[0]}.supabase.co",
-                port=5432,
-                database="postgres",
-                user="postgres",
-                password=SUPABASE_KEY.split(':')[1] if ':' in SUPABASE_KEY else SUPABASE_KEY
-            )
+            pg_conn = psycopg2.connect(DATABASE_URL)
         except Exception as e:
             print(f"PostgreSQL connection failed: {e}")
             return None
@@ -42,7 +27,7 @@ def get_pg_connection():
 
 def init_db():
     """Initialize database - SQLite for local, PostgreSQL for production"""
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         init_postgres()
     else:
         init_sqlite()
@@ -133,7 +118,7 @@ def init_postgres():
     cursor.close()
 
 def create_session(user: str, title: str = "New Chat") -> int:
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         return create_session_pg(user, title)
     return create_session_sqlite(user, title)
 
@@ -159,7 +144,7 @@ def create_session_pg(user: str, title: str = "New Chat") -> int:
     return session_id
 
 def get_sessions(user: str) -> list:
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         return get_sessions_pg(user)
     return get_sessions_sqlite(user)
 
@@ -199,7 +184,7 @@ def get_sessions_pg(user: str) -> list:
     return sessions
 
 def get_session(session_id: int) -> dict:
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         return get_session_pg(session_id)
     return get_session_sqlite(session_id)
 
@@ -237,7 +222,7 @@ def get_session_pg(session_id: int) -> dict:
     return {"id": row[0], "user": row[1], "title": row[2], "created_at": str(row[3]), "messages": messages}
 
 def add_message(session_id: int, role: str, content: str):
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         add_message_pg(session_id, role, content)
     else:
         add_message_sqlite(session_id, role, content)
@@ -263,7 +248,7 @@ def add_message_pg(session_id: int, role: str, content: str):
     cursor.close()
 
 def update_session_title(session_id: int, title: str):
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         update_session_title_pg(session_id, title)
     else:
         update_session_title_sqlite(session_id, title)
@@ -287,7 +272,7 @@ def update_session_title_pg(session_id: int, title: str):
     cursor.close()
 
 def delete_session(session_id: int):
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         delete_session_pg(session_id)
     else:
         delete_session_sqlite(session_id)
@@ -313,7 +298,7 @@ def delete_session_pg(session_id: int):
     cursor.close()
 
 def save_lecture_note(user: str, name: str, content: str, file_type: str) -> int:
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         return save_lecture_note_pg(user, name, content, file_type)
     return save_lecture_note_sqlite(user, name, content, file_type)
 
@@ -339,12 +324,12 @@ def save_lecture_note_pg(user: str, name: str, content: str, file_type: str) -> 
     return note_id
 
 def get_lecture_notes(user: str) -> list:
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         return get_lecture_notes_pg(user)
     return get_lecture_notes_sqlite(user)
 
 def get_lecture_note_by_id(note_id: int) -> dict:
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         return get_lecture_note_by_id_pg(note_id)
     return get_lecture_note_by_id_sqlite(note_id)
 
@@ -391,7 +376,7 @@ def get_lecture_notes_pg(user: str) -> list:
     return notes
 
 def delete_lecture_note(note_id: int):
-    if SUPABASE_URL and SUPABASE_KEY:
+    if DATABASE_URL:
         delete_lecture_note_pg(note_id)
     else:
         delete_lecture_note_sqlite(note_id)

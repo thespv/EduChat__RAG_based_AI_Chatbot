@@ -1,176 +1,207 @@
 # EduChat Deployment Guide
 
-## Option 1: Render + Supabase (Recommended)
+This guide covers deploying EduChat using **Vercel** (frontend) + **Render** (backend + PostgreSQL).
 
-### 1. Setup Supabase Database (Free)
+---
 
-1. Create account at [supabase.com](https://supabase.com)
-2. Click "New Project"
-3. Fill in details:
-   - Name: `educhat`
-   - Database Password: (create a strong password)
-   - Region: (choose closest to your users)
-4. Wait for setup to complete (~2 minutes)
+## Architecture
 
-5. **Get Connection Details:**
-   - Go to Project Settings → Database
-   - Find "Connection string" (URI)
-   - It looks like: `postgresql://postgres:[password]@db.xxxx.supabase.co:5432/postgres`
+```
+Browser → Vercel CDN → Render Backend → PostgreSQL
+```
 
-6. **Environment Variables:**
-   - `SUPABASE_URL`: `postgresql://postgres@db.xxxx.supabase.co`
-   - `SUPABASE_KEY`: Your database password
+---
 
-### 2. Backend (Render)
+## Step 1: Push to GitHub
 
-1. Create account at [render.com](https://render.com)
-2. Click "New" → "Web Service"
-3. Connect your GitHub repo
+Make sure your code is pushed to GitHub. Both Vercel and Render will connect to the same repo.
+
+```bash
+git add .
+git commit -m "Initial commit"
+git push origin main
+```
+
+---
+
+## Step 2: Deploy Backend to Render
+
+### 2.1 Create PostgreSQL Database
+
+1. Go to [render.com](https://render.com) and sign up
+2. Click **"New +"** → **"PostgreSQL"**
+3. Configure:
+   - **Name**: `educhat-db`
+   - **Database**: `educhat`
+   - **User**: (leave default)
+4. Click **"Create Database"**
+5. Wait for provisioning (~2 minutes)
+6. Copy the **"Internal Connection String"** (format: `postgres://...`)
+
+### 2.2 Create Web Service
+
+1. Click **"New +"** → **"Web Service"**
+2. Connect your GitHub repo
+3. Configure:
+   - **Name**: `educhat-api`
+   - **Region**: (choose closest to users)
+   - **Branch**: `main`
+   - **Root Directory**: (leave empty)
 4. Settings:
-   - Name: `educhat-api`
-   - Build Command: `pip install -r requirements.txt`
-   - Start Command: `python -m uvicorn api.index:app --host 0.0.0.0 --port $PORT`
-5. Environment Variables:
-   - `GEMINI_API_KEY`: Your Gemini API key
-   - `SUPABASE_URL`: Your Supabase URL (from step 1)
-   - `SUPABASE_KEY`: Your Supabase password
-6. Click "Create Web Service"
-
-### 3. Frontend (Render)
-
-1. New → Static Site
-2. Connect GitHub repo
-3. Settings:
-   - Name: `educhat-web`
-   - Build: `npm run build`
-   - Publish: `dist`
+   - **Runtime**: `Python 3`
+   - **Build Command**: `pip install -r requirements.txt`
+   - **Start Command**: `web: python -m uvicorn api.index:app --host 0.0.0.0 --port $PORT`
+5. Add Environment Variables (click **"Add Environment Variable"**):
+   ```
+   DATABASE_URL = (paste your PostgreSQL connection string)
+   GEMINI_API_KEY = (your Gemini API key)
+   GROQ_API_KEY = (your Groq API key)
+   ```
+6. Click **"Create Web Service"**
+7. Wait for deployment (~3-5 minutes)
+8. Copy your backend URL (e.g., `https://educhat-api.onrender.com`)
 
 ---
 
-## Option 2: Vercel + Railway
+## Step 3: Deploy Frontend to Vercel
 
-### Frontend (Vercel - Free)
-1. Go to [vercel.com](https://vercel.com)
-2. Import GitHub repo
-3. Deploy
+### 3.1 Update Vercel Configuration
 
-### Backend (Railway - $5/month)
-1. Go to [railway.app](https://railway.app)
-2. New Project → "Deploy from GitHub repo"
-3. Add Environment Variables:
-   - `GEMINI_API_KEY`: Your key
-   - `SUPABASE_URL`: Your Supabase URL
-   - `SUPABASE_KEY`: Your Supabase password
-4. Deploy
+Before deploying, update `vercel.json` with your Render backend URL:
 
----
-
-## Option 3: Fly.io (Free - No Sleep)
-
-```bash
-# Install Fly CLI
-curl -L https://fly.io/install.sh | sh
-
-# Login
-fly auth login
-
-# Launch (in project folder)
-fly launch
-
-# Deploy
-fly deploy
+```json
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://YOUR-APP-NAME.onrender.com/api/:path*"
+    }
+  ]
+}
 ```
 
----
+Replace `YOUR-APP-NAME` with your actual Render web service name.
 
-## Database Setup (Critical!)
+### 3.2 Deploy
 
-### If Using Supabase:
-
-1. **Create tables manually** (or the app will create them):
-```sql
--- Run this in Supabase SQL Editor
-
-CREATE TABLE IF NOT EXISTS chat_sessions (
-    id SERIAL PRIMARY KEY,
-    user TEXT NOT NULL,
-    title TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS chat_messages (
-    id SERIAL PRIMARY KEY,
-    session_id INTEGER NOT NULL,
-    role TEXT NOT NULL,
-    content TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE
-);
-
-CREATE TABLE IF NOT EXISTS lecture_notes (
-    id SERIAL PRIMARY KEY,
-    user TEXT NOT NULL,
-    name TEXT NOT NULL,
-    content TEXT NOT NULL,
-    file_type TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
-
-2. **Add Environment Variables** in your deployment platform:
-   - `SUPABASE_URL`: From Supabase Dashboard → Settings → Database
-   - `SUPABASE_KEY`: Your database password
+1. Go to [vercel.com](https://vercel.com) and sign up
+2. Click **"Add New..."** → **"Project"**
+3. Import your GitHub repo
+4. Configure:
+   - **Framework Preset**: `Vite`
+   - **Root Directory**: (leave as `.`)
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+5. Add Environment Variable:
+   ```
+   VITE_API_URL = https://YOUR-APP-NAME.onrender.com
+   ```
+6. Click **"Deploy"**
 
 ---
 
-## Update API URL in Code
+## Step 4: Verify Deployment
 
-Before deploying, update `main.js`:
-
-```javascript
-// Replace ALL instances of:
-http://localhost:8000
-
-// With your deployed backend URL:
-https://educhat-api.onrender.com
-```
+1. Visit your Vercel URL (e.g., `https://your-project.vercel.app`)
+2. You should see the EduChat login page
+3. Log in and test:
+   - Send a message
+   - Upload a file (max 50MB)
 
 ---
 
-## Required Files Created
+## Environment Variables Reference
 
-| File | Purpose |
-|------|---------|
-| `Procfile` | Render backend startup |
-| `runtime.txt` | Python 3.12 |
-| `requirements.txt` | Python dependencies |
-| `package.json` | Node scripts |
-| `api/database.py` | SQLite + PostgreSQL support |
+### Render Backend
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `DATABASE_URL` | Yes | PostgreSQL connection string |
+| `GEMINI_API_KEY` | Yes | Google Gemini API key |
+| `GROQ_API_KEY` | Yes | Groq API key |
+| `OPENAI_API_KEY` | No | OpenAI API key (optional) |
+| `ANTHROPIC_API_KEY` | No | Anthropic API key (optional) |
+
+### Vercel Frontend
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `VITE_API_URL` | Yes | Your Render backend URL |
 
 ---
 
-## Local Testing
+## File Upload Limits
 
-```bash
-# Backend
-npm run server
-
-# Frontend
-npm run dev
-```
-
-Open http://localhost:5173
+- **Max file size**: 50MB
+- **Supported formats**: PDF, DOC, DOCX, PPT, PPTX, TXT, PNG, JPG, MP3, WAV, MP4
 
 ---
 
 ## Troubleshooting
 
-**Database not connecting:**
-- Check SUPABASE_URL format: `postgresql://postgres@db.xxx.supabase.co`
-- Check SUPABASE_KEY is correct password
+### Backend Issues
 
-**App crashes:**
-- Check Render logs for errors
-- Verify all environment variables are set
-- Ensure psycopg2-binary is installed
+**CORS errors:**
+- Verify CORS is set to allow your Vercel domain
+- Check browser console for specific errors
+
+**Database connection failed:**
+- Verify `DATABASE_URL` is correct
+- Check Render logs for PostgreSQL errors
+
+**API not responding:**
+- Check Render web service status
+- Verify environment variables are set
+- Check "Free" tier sleep: Render spins down after 15 min inactivity
+
+### Frontend Issues
+
+**API calls failing:**
+- Verify `VITE_API_URL` is set correctly (include `https://`)
+- Check that `vercel.json` rewrites point to correct backend
+
+**Static assets not loading:**
+- Rebuild: Vercel Dashboard → Your Project → Redeploy
+
+---
+
+## Cost Summary
+
+| Service | Tier | Monthly Cost |
+|---------|------|-------------|
+| Vercel | Hobby | $0 |
+| Render Web Service | Free | $0 |
+| Render PostgreSQL | Free | $0 |
+| **Total** | | **$0** |
+
+### Free Tier Limitations
+
+- **Render**: Spins down after 15 min inactivity (cold start ~30s)
+- **PostgreSQL**: 1GB storage, 250MB RAM
+
+---
+
+## Local Development
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+npm install
+
+# Start backend
+npm run server
+
+# Start frontend (new terminal)
+npm run dev
+```
+
+---
+
+## Quick Deploy Commands
+
+```bash
+# Update and push
+git add .
+git commit -m "Update code"
+git push
+
+# Both platforms auto-deploy on push to main branch
+```
