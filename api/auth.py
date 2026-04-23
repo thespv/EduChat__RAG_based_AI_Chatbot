@@ -91,15 +91,21 @@ def get_current_user(request: Request) -> dict:
 def send_verification_email(email: str, token: str, name: str) -> bool:
     """Send verification email using Resend"""
     resend_api_key = os.getenv("RESEND_API_KEY", "")
+    
+    # Print verification link for debugging
+    verification_url = f"https://educhat.onrender.com/api/auth/verify/{token}"
+    print(f"=== VERIFICATION EMAIL ===")
+    print(f"To: {email}")
+    print(f"Verification URL: {verification_url}")
+    print(f"=========================")
+    
     if not resend_api_key:
-        print(f"RESEND_API_KEY not set - Verification link: /api/auth/verify/{token}")
+        print(f"RESEND_API_KEY not set - Using debug link above")
         return False
     
     try:
         import resend
         resend.config.api_key = resend_api_key
-        
-        verification_url = f"https://educhat.onrender.com/api/auth/verify/{token}"
         
         response = resend.Emails.send({
             "from": "EduChat <onboarding@resend.dev>",
@@ -118,6 +124,7 @@ def send_verification_email(email: str, token: str, name: str) -> bool:
             </html>
             """
         })
+        print(f"Resend response: {response}")
         return True
     except Exception as e:
         print(f"Email sending failed: {e}")
