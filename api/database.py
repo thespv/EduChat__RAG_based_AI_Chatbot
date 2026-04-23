@@ -38,11 +38,6 @@ def init_sqlite():
         )
     """)
     
-    # Delete old chat data
-    cursor.execute("DELETE FROM chat_messages")
-    cursor.execute("DELETE FROM chat_sessions")
-    cursor.execute("DELETE FROM lecture_notes")
-    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,15 +92,11 @@ def init_postgres():
             password_hash TEXT NOT NULL,
             name TEXT NOT NULL,
             verified BOOLEAN DEFAULT FALSE,
+            name TEXT NOT NULL,
             verification_token TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    
-    # Delete old chat data
-    cursor.execute("DELETE FROM chat_messages")
-    cursor.execute("DELETE FROM chat_sessions")
-    cursor.execute("DELETE FROM lecture_notes")
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS chat_sessions (
