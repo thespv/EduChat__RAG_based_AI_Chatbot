@@ -34,20 +34,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Import both services
-from api.services.llm_service import process_multimodal_query
-from api.services.langchain_service import (
-    process_rag_query, 
-    generate_quiz_with_rag,
-    generate_flashcards_with_rag,
-    get_rag_system
-)
-
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
 print(f"Index.py - Env path: {env_path}")
 print(f"Index.py - GEMINI_KEY: {GEMINI_KEY[:20] if GEMINI_KEY else 'NOT FOUND'}")
 
 os.environ["GEMINI_API_KEY"] = GEMINI_KEY
+
+# Import services after setting environment variables
+try:
+    from api.services.llm_service import process_multimodal_query
+    from api.services.langchain_service import (
+        process_rag_query, 
+        generate_quiz_with_rag,
+        generate_flashcards_with_rag,
+        get_rag_system
+    )
+    print("Services loaded successfully")
+except Exception as e:
+    print(f"Error loading services: {e}")
 
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
@@ -637,3 +641,5 @@ async def search_documents(
 dist_path = Path(__file__).parent.parent / "dist"
 if dist_path.exists():
     app.mount("/", StaticFiles(directory=str(dist_path), html=True))
+else:
+    print(f"Warning: dist folder not found at {dist_path}")
