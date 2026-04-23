@@ -2,27 +2,41 @@ import os
 import base64
 from pathlib import Path
 from io import BytesIO
-from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 from typing import Optional, List
 from dotenv import load_dotenv
 
 from api.database import (
-    init_db, create_session, get_sessions, get_session, 
-    add_message, update_session_title, delete_session,
-    save_lecture_note, get_lecture_notes, delete_lecture_note, get_lecture_note_by_id
+    init_db, 
+    get_sessions as db_get_sessions,
+    get_session as db_get_session,
+    add_message, 
+    update_session_title, delete_session,
+    save_lecture_note, get_lecture_notes, delete_lecture_note, get_lecture_note_by_id,
+    get_user_by_id, create_session as db_create_session
 )
 
 # Load .env from project root (works locally and on production)
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path)
 
+for key in ["GEMINI_API_KEY", "GROQ_API_KEY", "OPENAI_API_KEY", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"]:
+    if not os.getenv(key):
+        os.environ[key] = os.environ.get(key, "")
+
 GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
 os.environ["GEMINI_API_KEY"] = GEMINI_KEY
 
 app = FastAPI()
+
+# Rate limiting
+limiter = Limiter(key_func=get_remote_address)
+app.state.limiter = limiter
 
 init_db()
 
@@ -34,11 +48,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-GEMINI_KEY = os.getenv("GEMINI_API_KEY", "")
 print(f"Index.py - Env path: {env_path}")
 print(f"Index.py - GEMINI_KEY: {GEMINI_KEY[:20] if GEMINI_KEY else 'NOT FOUND'}")
-
-os.environ["GEMINI_API_KEY"] = GEMINI_KEY
 
 # Import services after setting environment variables
 try:
@@ -53,17 +64,39 @@ try:
 except Exception as e:
     print(f"Error loading services: {e}")
 
+# Import auth router
+from api.auth import router as auth_router, get_current_user
+from slowapi.errors import RateLimitExceeded
+from fastapi import Request
+
 MAX_FILE_SIZE = 50 * 1024 * 1024
 
+# Include auth routes
+app.include_router(auth_router)
+
+# Rate limit exceeded handler
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(
+        status_code=429,
+        content={"error": "Too many requests. Please try again later."}
+    )
+
 @app.post("/api/chat")
+@limiter.limit("20/minute")
 async def chat_endpoint(
+    request: Request,
     message: str = Form(...),
-    user: str = Form(default="User"),
     session_id: Optional[int] = Form(default=None),
     save_history: bool = Form(default=True),
     files: Optional[List[UploadFile]] = File(default=None)
 ):
     try:
+        # Get current user from token
+        user = get_current_user(request)
+        user_id = user["id"]
+        user_email = user["email"]
+        
         processed_files = []
         
         if files:
@@ -239,17 +272,19 @@ async def health_check():
     return {"status": "healthy", "service": "EduChat API"}
 
 @app.get("/api/chat/history")
-async def get_chat_history(user: str = "User"):
+async def get_chat_history(request: Request):
     try:
-        sessions = get_sessions(user)
+        user = get_current_user(request)
+        sessions = get_sessions(user["id"])
         return {"sessions": sessions}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.get("/api/chat/session/{session_id}")
-async def get_chat_session(session_id: int):
+async def get_chat_session(request: Request, session_id: int):
     try:
-        session = get_session(session_id)
+        user = get_current_user(request)
+        session = get_session(session_id, user["id"])
         if not session:
             return JSONResponse({"error": "Session not found"}, status_code=404)
         return session

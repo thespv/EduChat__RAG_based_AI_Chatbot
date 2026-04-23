@@ -1,6 +1,7 @@
+const token = localStorage.getItem('educhat_token');
 const user = JSON.parse(localStorage.getItem('educhat_user') || 'null');
 
-if (!user || !user.name || !user.email) {
+if (!token || !user) {
     window.location.href = 'index.html';
 }
 
@@ -14,9 +15,15 @@ function getApiBase() {
 }
 
 const API_BASE = getApiBase();
-let currentSessionId = null;
+let currentSessionId = localStorage.getItem('educhat_session') || null;
 let attachedFiles = [];
-let newChatMode = true;
+let newChatMode = !currentSessionId;
+
+function getAuthHeaders() {
+    return {
+        'Authorization': `Bearer ${localStorage.getItem('educhat_token')}`
+    };
+}
 
 function showToast(message, type = 'success') {
     const existing = document.querySelector('.custom-toast');
@@ -1354,7 +1361,9 @@ function showProfileModal() {
     `);
     
     document.getElementById('logout-btn')?.addEventListener('click', () => {
+        localStorage.removeItem('educhat_token');
         localStorage.removeItem('educhat_user');
+        localStorage.removeItem('educhat_session');
         window.location.href = 'index.html';
     });
 }
