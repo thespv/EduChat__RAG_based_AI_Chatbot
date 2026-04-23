@@ -1,10 +1,10 @@
 import os
 import json
 from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
 from pathlib import Path
+from dotenv import load_dotenv
 
-env_path = Path("C:/Users/SAURAV/OneDrive/Desktop/EduChat/.env")
+env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
 
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")

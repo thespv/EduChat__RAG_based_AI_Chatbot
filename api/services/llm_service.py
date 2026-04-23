@@ -1,10 +1,11 @@
 import os
 import json
-from typing import List, Dict, Any, Optional
-from dotenv import load_dotenv
+from typing import List, Dict, Any
 from pathlib import Path
 
-env_path = Path("C:/Users/SAURAV/OneDrive/Desktop/EduChat/.env")
+from dotenv import load_dotenv
+
+env_path = Path(__file__).parent.parent.parent / ".env"
 load_dotenv(env_path)
 
 from api.services.api_manager import get_api_manager
