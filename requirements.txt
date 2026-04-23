@@ -25,8 +25,7 @@ langchain-groq>=0.2.0
 pypdf>=5.1.0
 python-docx>=1.2.0
 
-# Database
-sqlite3 (built-in)
+# Database (sqlite3 is built-in to Python)
 psycopg2-binary>=2.9.0
 
 # Vector Store (for RAG embeddings)
