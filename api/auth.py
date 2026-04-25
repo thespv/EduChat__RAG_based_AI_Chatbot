@@ -103,7 +103,7 @@ def send_verification_email(email: str, token: str, name: str) -> bool:
         print(f"RESEND_API_KEY not set - Using debug link above")
         return False
     
-try:
+    try:
         import resend
         
         response = resend.Emails.send({
