@@ -18,14 +18,21 @@ def get_pg_connection():
     if not DATABASE_URL:
         return None
     
-    if pg_conn is None:
-        import psycopg2
-        try:
-            pg_conn = psycopg2.connect(DATABASE_URL)
-        except Exception as e:
-            print(f"PostgreSQL connection failed: {e}")
-            return None
-    return pg_conn
+    import psycopg2
+    try:
+        if pg_conn is not None:
+            try:
+                pg_conn.cursor().execute("SELECT 1")
+                return pg_conn
+            except:
+                pg_conn = None
+        
+        pg_conn = psycopg2.connect(DATABASE_URL)
+        pg_conn.autocommit = True
+        return pg_conn
+    except Exception as e:
+        print(f"PostgreSQL connection failed: {e}")
+        return None
 
 def init_db():
     """Initialize database - SQLite for local, PostgreSQL for production"""
