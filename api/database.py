@@ -289,53 +289,60 @@ def add_message_pg(session_id: int, role: str, content: str):
     conn.commit()
     cursor.close()
 
-def update_session_title(session_id: int, title: str):
+def update_session_title(session_id: int, user_id: int, title: str):
     if DATABASE_URL:
-        update_session_title_pg(session_id, title)
+        update_session_title_pg(session_id, user_id, title)
     else:
-        update_session_title_sqlite(session_id, title)
+        update_session_title_sqlite(session_id, user_id, title)
 
-def update_session_title_sqlite(session_id: int, title: str):
+def update_session_title_sqlite(session_id: int, user_id: int, title: str):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET title = ? WHERE id = ?", (title, session_id))
+    cursor.execute("UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?", (title, session_id, user_id))
     conn.commit()
     conn.close()
 
-def update_session_title_pg(session_id: int, title: str):
+def update_session_title_pg(session_id: int, user_id: int, title: str):
     conn = get_pg_connection()
     if not conn:
-        update_session_title_sqlite(session_id, title)
+        update_session_title_sqlite(session_id, user_id, title)
         return
     
     cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET title = %s WHERE id = %s", (title, session_id))
+    cursor.execute("UPDATE chat_sessions SET title = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND user_id = %s", (title, session_id, user_id))
     conn.commit()
     cursor.close()
 
-def delete_session(session_id: int):
+def delete_session(session_id: int, user_id: int = None):
     if DATABASE_URL:
-        delete_session_pg(session_id)
+        delete_session_pg(session_id, user_id)
     else:
-        delete_session_sqlite(session_id)
+        delete_session_sqlite(session_id, user_id)
 
-def delete_session_sqlite(session_id: int):
+def delete_session_sqlite(session_id: int, user_id: int = None):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
-    cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
+    if user_id:
+        cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+    else:
+        cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+        cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
     conn.commit()
     conn.close()
 
-def delete_session_pg(session_id: int):
+def delete_session_pg(session_id: int, user_id: int = None):
     conn = get_pg_connection()
     if not conn:
-        delete_session_sqlite(session_id)
+        delete_session_sqlite(session_id, user_id)
         return
     
     cursor = conn.cursor()
     cursor.execute("DELETE FROM chat_messages WHERE session_id = %s", (session_id,))
-    cursor.execute("DELETE FROM chat_sessions WHERE id = %s", (session_id,))
+    if user_id:
+        cursor.execute("DELETE FROM chat_sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
+    else:
+        cursor.execute("DELETE FROM chat_sessions WHERE id = %s", (session_id,))
     conn.commit()
     cursor.close()
 

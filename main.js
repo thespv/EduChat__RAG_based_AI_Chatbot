@@ -157,7 +157,7 @@ function parseMarkdown(text) {
 // Helper to fetch full extracted text for a note using streaming endpoint
 async function fetchNoteFullText(noteId) {
     try {
-        const response = await fetch(API_BASE + '/api/notes/' + noteId + '/content');
+        const response = await fetch(API_BASE + '/api/notes/' + noteId + '/content', { headers: getAuthHeaders() });
         if (!response.ok) return '';
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
@@ -198,7 +198,10 @@ async function loadChatHistory() {
     }
     
     try {
-        const response = await fetch(API_BASE + '/api/chat/history?user=' + encodeURIComponent(user.name), { signal: AbortSignal.timeout(5000) });
+        const response = await fetch(API_BASE + '/api/chat/history', { 
+            headers: getAuthHeaders(),
+            signal: AbortSignal.timeout(5000) 
+        });
         const data = await response.json();
         if (!container) return;
         
@@ -246,7 +249,10 @@ function setupChatHistoryListeners() {
             e.stopPropagation();
             const sessionId = parseInt(btn.dataset.deleteId);
             try {
-                await fetch(API_BASE + '/api/chat/session/' + sessionId, { method: 'DELETE' });
+                await fetch(API_BASE + '/api/chat/session/' + sessionId, { 
+                    method: 'DELETE',
+                    headers: getAuthHeaders()
+                });
                 loadChatHistory();
             } catch (err) {
                 console.error('Failed to delete session:', err);
@@ -266,7 +272,10 @@ async function loadSession(sessionId) {
     }
     
     try {
-        const response = await fetch(API_BASE + '/api/chat/session/' + sessionId, { signal: AbortSignal.timeout(5000) });
+        const response = await fetch(API_BASE + '/api/chat/session/' + sessionId, { 
+            headers: getAuthHeaders(),
+            signal: AbortSignal.timeout(5000) 
+        });
         const data = await response.json();
         
         if (data.messages) {
@@ -692,8 +701,8 @@ summarizeBtn?.addEventListener('click', async () => {
     try {
         const response = await fetch(API_BASE + '/api/chat', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-            body: `message=Summarize: ${allText.substring(0, 2000)}&user=${encodeURIComponent(user.name)}&save_history=false`
+            headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: `message=Summarize: ${allText.substring(0, 2000)}&save_history=false`
         });
         const data = await response.json();
         if (data.reply) {
@@ -771,11 +780,10 @@ document.getElementById('quick-summarize')?.addEventListener('click', async () =
             const summaryMessage = `Summarize the following text:\n\n${textToSummarize.substring(0, 3000)}\n\n${stylePrompt}`;
             const params = new URLSearchParams();
             params.append('message', summaryMessage);
-            params.append('user', user.name);
             params.append('save_history', 'false');
             const response = await fetch(API_BASE + '/api/chat', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: params.toString()
             });
             const data = await response.json();
@@ -937,7 +945,6 @@ async function sendMessage() {
     try {
         const formData = new FormData();
         formData.append('message', message);
-        formData.append('user', user.name);
         if (currentSessionId) formData.append('session_id', currentSessionId);
         
         for (const f of oldFiles) {
@@ -946,6 +953,7 @@ async function sendMessage() {
         
         const response = await fetch(API_BASE + '/api/chat', {
             method: 'POST',
+            headers: getAuthHeaders(),
             body: formData
         });
         
@@ -960,7 +968,7 @@ async function sendMessage() {
                 const shortTitle = title.length > 25 ? title.substring(0, 25) + '...' : title;
                 fetch(API_BASE + '/api/chat/session/' + currentSessionId, {
                     method: 'PUT',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: `title=${encodeURIComponent(shortTitle)}`
                 }).then(() => loadChatHistory());
                 isNewChat = false;
@@ -1086,7 +1094,7 @@ function loadLectureNotes() {
          const container = document.getElementById('notes-list');
          if (!container) return;
          
-         fetch(API_BASE + '/api/notes?user=' + encodeURIComponent(user.name))
+         fetch(API_BASE + '/api/notes', { headers: getAuthHeaders() })
             .then(res => res.json())
             .then(data => {
                 const notes = data.notes || [];
@@ -1128,7 +1136,7 @@ container.querySelectorAll('.view-note-btn').forEach(btn => {
                         let pageMarkers = [];
                         
                         try {
-                            const response = await fetch(API_BASE + '/api/notes/' + noteId + '/content');
+                            const response = await fetch(API_BASE + '/api/notes/' + noteId + '/content', { headers: getAuthHeaders() });
                             if (!response.ok) {
                                 contentArea.innerHTML = note.content ? parseMarkdown(note.content) : 'Error loading note';
                                 return;
@@ -1226,7 +1234,10 @@ container.querySelectorAll('.view-note-btn').forEach(btn => {
                     btn.addEventListener('click', async () => {
                         const noteId = btn.dataset.id;
                         try {
-                            await fetch(API_BASE + '/api/notes/' + noteId, { method: 'DELETE' });
+                            await fetch(API_BASE + '/api/notes/' + noteId, { 
+                                method: 'DELETE',
+                                headers: getAuthHeaders()
+                            });
                             loadLectureNotes();
                             showToast('Note deleted!', 'success');
                         } catch (err) {
@@ -1293,12 +1304,11 @@ function loadStudyPlans() {
             try {
                 const formData = new URLSearchParams();
                 formData.append('message', `Create a detailed structured ${timeframe} study plan to learn ${topic}. Format logically with days/weeks.`);
-                formData.append('user', user.name);
                 formData.append('save_history', 'false');
                 
                 const response = await fetch(API_BASE + '/api/chat', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
                     body: formData
                 });
                 const data = await response.json();
@@ -1475,11 +1485,10 @@ function showFlashcardGenerator() {
             const formData = new URLSearchParams();
             formData.append('topic', topic);
             formData.append('num_cards', count);
-            formData.append('user', user.name);
             
             const response = await fetch(API_BASE + '/api/chat/generate-flashcards', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData
             });
             const data = await response.json();
@@ -1606,11 +1615,10 @@ function showQuizGenerator() {
             formData.append('topic', topic);
             formData.append('difficulty', difficulty);
             formData.append('num_questions', count);
-            formData.append('user', user.name);
             
             const response = await fetch(API_BASE + '/api/chat/generate-quiz', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
                 body: formData
             });
             const data = await response.json();

@@ -18,7 +18,8 @@ from api.database import (
     add_message, 
     update_session_title, delete_session,
     save_lecture_note, get_lecture_notes, delete_lecture_note, get_lecture_note_by_id,
-    get_user_by_id, create_session as db_create_session
+    get_user_by_id, create_session as db_create_session,
+    get_session
 )
 
 # Load .env from project root (works locally and on production)
@@ -324,17 +325,19 @@ async def create_chat_session(request: Request, title: str = Form(default="New C
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.put("/api/chat/session/{session_id}")
-async def update_chat_session(session_id: int, title: str = Form(...)):
+async def update_chat_session(request: Request, session_id: int, title: str = Form(...)):
     try:
-        update_session_title(session_id, title)
+        user = get_current_user(request)
+        update_session_title(session_id, title, user["id"])
         return {"success": True}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.delete("/api/chat/session/{session_id}")
-async def delete_chat_session(session_id: int):
+async def delete_chat_session(request: Request, session_id: int):
     try:
-        delete_session(session_id)
+        user = get_current_user(request)
+        delete_session(session_id, user["id"])
         return {"success": True}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -600,15 +603,16 @@ async def delete_note(note_id: int):
 # LangChain-powered endpoints
 @app.post("/api/chat/generate-quiz")
 async def generate_quiz(
+    request: Request,
     topic: str = Form(...),
     difficulty: str = Form(default="Medium"),
     num_questions: int = Form(default=5),
-    user: str = Form(default="User"),
     use_rag: bool = Form(default=False)
 ):
     try:
+        user = get_current_user(request)
         if use_rag:
-            result = await generate_quiz_with_rag(topic, difficulty, num_questions, user, 0)
+            result = await generate_quiz_with_rag(topic, difficulty, num_questions, user["email"], 0)
         else:
             from api.services.langchain_service import get_langchain_llm
             from langchain_core.prompts import ChatPromptTemplate
@@ -628,14 +632,15 @@ async def generate_quiz(
 
 @app.post("/api/chat/generate-flashcards")
 async def generate_flashcards(
+    request: Request,
     topic: str = Form(...),
     num_cards: int = Form(default=5),
-    user: str = Form(default="User"),
     use_rag: bool = Form(default=False)
 ):
     try:
+        user = get_current_user(request)
         if use_rag:
-            result = await generate_flashcards_with_rag(topic, num_cards, user, 0)
+            result = await generate_flashcards_with_rag(topic, num_cards, user["email"], 0)
         else:
             from api.services.langchain_service import get_langchain_llm
             from langchain_core.prompts import ChatPromptTemplate
