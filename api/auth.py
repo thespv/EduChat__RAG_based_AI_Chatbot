@@ -103,11 +103,11 @@ def send_verification_email(email: str, token: str, name: str) -> bool:
         print(f"RESEND_API_KEY not set - Using debug link above")
         return False
     
-    try:
+try:
         import resend
-        resend.config.api_key = resend_api_key
         
         response = resend.Emails.send({
+            "api_key": resend_api_key,
             "from": "EduChat <onboarding@resend.dev>",
             "to": email,
             "subject": "Verify your EduChat account",

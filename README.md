@@ -99,12 +99,14 @@ Create a `.env` file in the root directory:
 # API Configuration
 GEMINI_API_KEY=your_gemini_api_key_here
 OPENAI_API_KEY=your_openai_api_key_here
+RESEND_API_KEY=your_resend_api_key_here
 
 # Database (optional)
 DATABASE_URL=postgresql://user:password@localhost:5432/educhat
 
 # Server
 API_BASE_URL=http://localhost:8000
+JWT_SECRET=your_jwt_secret_here
 ```
 
 ## Project Structure

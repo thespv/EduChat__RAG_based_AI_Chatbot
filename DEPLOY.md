@@ -57,6 +57,8 @@ Click **Add Environment Variable**:
 ```
 DATABASE_URL = (paste your PostgreSQL connection string)
 GEMINI_API_KEY = (your Google Gemini API key)
+RESEND_API_KEY = (your Resend API key for email verification)
+JWT_SECRET = (random string for JWT tokens - recommended for production)
 ```
 
 Optional (for fallback):
@@ -89,6 +91,8 @@ Wait for deployment (~3-5 minutes)
 |----------|----------|-------------|
 | `DATABASE_URL` | Yes | PostgreSQL connection string |
 | `GEMINI_API_KEY` | Yes | Google Gemini API key |
+| `RESEND_API_KEY` | Yes | Resend API key for email verification |
+| `JWT_SECRET` | No | Random string for JWT token signing (auto-generated if not set) |
 | `GROQ_API_KEY` | No | Groq API key (fallback) |
 | `OPENAI_API_KEY` | No | OpenAI API key (fallback) |
 | `ANTHROPIC_API_KEY` | No | Anthropic API key (fallback) |
@@ -129,6 +133,12 @@ Set multiple API keys for better reliability.
 ### API errors
 - Verify `GEMINI_API_KEY` is set correctly
 - Check Render logs for error messages
+
+### Not receiving verification emails
+- Verify `RESEND_API_KEY` is set in Render environment variables
+- Check Render logs for email sending errors
+- For Resend free tier: The sender is `onboarding@resend.dev` which works for testing
+- Make sure to verify your account by clicking the link in the logs (debug mode) or email
 
 ---
 
