@@ -185,47 +185,7 @@ def init_postgres():
 # User Authentication Functions
 # ============================================================
 
-def create_user(email: str, password_hash: str, name: str, verification_token: str = None) -> int:
-    if DATABASE_URL:
-        return get_sessions_pg(user)
-    return get_sessions_sqlite(user)
-
-def get_sessions_sqlite(user: str) -> list:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, title, created_at, updated_at 
-        FROM chat_sessions 
-        WHERE user = ? 
-        ORDER BY updated_at DESC
-    """, (user,))
-    
-    sessions = []
-    for row in cursor.fetchall():
-        sessions.append({"id": row[0], "title": row[1], "created_at": row[2], "updated_at": row[3]})
-    conn.close()
-    return sessions
-
-def get_sessions_pg(user: str) -> list:
-    conn = get_pg_connection()
-    if not conn:
-        return get_sessions_sqlite(user)
-    
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT id, title, created_at, updated_at 
-        FROM chat_sessions 
-        WHERE "user" = %s 
-        ORDER BY updated_at DESC
-    """, (user,))
-    
-    sessions = []
-    for row in cursor.fetchall():
-        sessions.append({"id": row[0], "title": row[1], "created_at": str(row[2]), "updated_at": str(row[3])})
-    cursor.close()
-    return sessions
-
-def get_session(session_id: int) -> dict:
+def get_session(session_id: int, user_id: int) -> dict:
     if DATABASE_URL:
         return get_session_pg(session_id)
     return get_session_sqlite(session_id)

@@ -264,13 +264,13 @@ async def chat_endpoint(
         if processed_files:
             # RAG mode with document context
             try:
-                result = await process_rag_query(message, user, processed_files, session_id or 0)
+                result = await process_rag_query(message, user_email, processed_files, session_id or 0)
             except Exception as e:
                 print(f"RAG error, falling back to regular LLM: {e}")
-                result = await process_multimodal_query(message, user, processed_files)
+                result = await process_multimodal_query(message, user_email, processed_files)
         else:
             # Regular LLM mode
-            result = await process_multimodal_query(message, user, processed_files)
+            result = await process_multimodal_query(message, user_email, processed_files)
         
         if save_history:
             if not session_id:
