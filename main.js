@@ -25,6 +25,26 @@ function getAuthHeaders() {
     };
 }
 
+function generateChatTitle(message) {
+    const greetings = /^(hi|hello|hey|hii|hiii|heya|yo|sup|howdy|greetings|good\s*(morning|afternoon|evening|night)|thanks|thank you|ok|okay|yes|no|sure|bye|see you)[\s!?.]*$/i;
+    if (greetings.test(message.trim())) return null;
+    
+    let text = message;
+    
+    text = text.replace(/^(can\s+you\s+|could\s+you\s+|please\s+|i\s+want\s+to\s+|i\s+need\s+to\s+|i\s+would\s+like\s+to\s+|help\s+me\s+|tell\s+me\s+about\s+|explain\s+|what\s+is\s+|what\s+are\s+|how\s+does\s+|how\s+do\s+|how\s+to\s+|why\s+is\s+|why\s+do\s+|when\s+is\s+|where\s+is\s+|who\s+is\s+|describe\s+|show\s+me\s+|give\s+me\s+|let'?s\s+talk\s+about\s+|i'?m\s+studying\s+|i'?m\s+learning\s+about\s+)/gi, '');
+    
+    text = text.replace(/\?+$/g, '').trim();
+    
+    const stopWords = new Set(['a','an','the','is','are','was','were','be','been','being','have','has','had','do','does','did','will','would','shall','should','may','might','must','can','could','of','in','to','for','with','on','at','from','by','about','as','into','like','through','after','over','between','out','against','during','without','before','under','around','among','and','but','or','nor','not','so','yet','both','either','neither','each','all','any','few','more','most','other','some','such','no','only','own','same','than','too','very','just','because','if','when','where','which','while','who','whom','what','how','that','this','these','those','it','its','i','me','my','we','our','you','your','he','him','his','she','her','they','them','their','there','here']);
+    
+    const words = text.split(/\s+/).filter(w => w.length > 2 && !stopWords.has(w.toLowerCase()));
+    
+    if (words.length === 0) return null;
+    
+    const title = words.slice(0, 4).join(' ');
+    return title.length > 30 ? title.substring(0, 30) + '...' : title;
+}
+
 function showToast(message, type = 'success') {
     const existing = document.querySelector('.custom-toast');
     if (existing) existing.remove();
@@ -194,7 +214,7 @@ async function loadChatHistory() {
     
     const container = document.querySelector('.chat-history-list');
     if (container) {
-        container.innerHTML = '<li class="chat-history-item new-chat-btn"><span class="menu-icon" style="color: #c8b384;">➕</span> <span class="chat-title-text">New Chat</span></li><li class="chat-history-item loading"><span class="chat-title-text" style="color: #9ca3af; font-size: 0.85rem;">Loading...</span></li>';
+        container.innerHTML = '<li class="chat-history-item new-chat-btn"><span class="menu-icon" style="color: var(--accent);">➕</span> <span class="chat-title-text">New Chat</span></li><li class="chat-history-item loading"><span class="chat-title-text" style="color: var(--text-muted); font-size: 0.85rem;">Loading...</span></li>';
     }
     
     try {
@@ -202,20 +222,51 @@ async function loadChatHistory() {
             headers: getAuthHeaders(),
             signal: AbortSignal.timeout(5000) 
         });
+        
+        if (response.status === 401) {
+            localStorage.removeItem('educhat_token');
+            localStorage.removeItem('educhat_user');
+            window.location.href = 'index.html';
+            return;
+        }
+        
         const data = await response.json();
         if (!container) return;
         
-        container.innerHTML = '<li class="chat-history-item new-chat-btn"><span class="menu-icon" style="color: #c8b384;">➕</span> <span class="chat-title-text">New Chat</span></li>';
+        container.innerHTML = '<li class="chat-history-item new-chat-btn"><span class="menu-icon" style="color: var(--accent);">➕</span> <span class="chat-title-text">New Chat</span></li>';
         
         if (data.sessions && data.sessions.length > 0) {
-            container.innerHTML += data.sessions.map(session => `
+            const sessions = await Promise.all(data.sessions.map(async (session) => {
+                if (session.title === 'New Chat') {
+                    try {
+                        const sessRes = await fetch(API_BASE + '/api/chat/session/' + session.id, { 
+                            headers: getAuthHeaders(),
+                            signal: AbortSignal.timeout(3000)
+                        });
+                        if (sessRes.ok) {
+                            const sessData = await sessRes.json();
+                            if (sessData.messages && sessData.messages.length > 0) {
+                                const meaningfulMsg = sessData.messages.find(m => m.role === 'user' && generateChatTitle(m.content));
+                                if (meaningfulMsg) {
+                                    session.title = generateChatTitle(meaningfulMsg.content);
+                                }
+                            }
+                        }
+                    } catch (e) {
+                        // Keep "New Chat" if fetch fails
+                    }
+                }
+                return session;
+            }));
+            
+            container.innerHTML += sessions.map(session => `
                 <li class="chat-history-item" data-session-id="${session.id}">
                     <span class="menu-icon" style="color: #9ca3af; font-size: 1rem;">💬</span>
                     <span class="chat-title-text">${session.title}</span>
                     <span class="delete-chat" data-delete-id="${session.id}">✕</span>
                 </li>
             `).join('');
-            currentSessionId = data.sessions[0].id;
+            currentSessionId = sessions[0].id;
             loadSession(currentSessionId);
         }
         
@@ -440,14 +491,6 @@ document.querySelector('#app').innerHTML = `
                 <button id="sidebar-toggle" class="nav-toggle-btn" title="Toggle Menu">☰</button>
                 <span class="logo-icon-gold">📚</span>
                 <h1 class="logo-text">EduChat <span class="ai-text">AI</span></h1>
-                <button id="search-toggle-mobile" class="nav-toggle-btn mobile-only" title="Toggle Search" style="margin-left: auto; margin-right: 8px;">🔍</button>
-            </div>
-            <div class="search-section">
-                <div class="search-box">
-                    <span class="search-icon">🔍</span>
-                    <input type="text" id="search-input" placeholder="Search topics, notes..." />
-                </div>
-                <div id="search-results" class="search-results"></div>
             </div>
             <div class="user-section">
                 <div class="user-profile-display" id="user-profile-display" style="cursor: pointer;">
@@ -462,55 +505,61 @@ document.querySelector('#app').innerHTML = `
             <aside class="left-sidebar">
                 <button class="sidebar-close-btn" id="left-sidebar-close" title="Close menu">&times;</button>
                 <!-- Chat History Section -->
-                <div style="padding: 16px 20px; border-bottom: 1px solid #e5e7eb;">
-                    <h3 style="font-size: 0.75rem; text-transform: uppercase; color: #6b7280; letter-spacing: 1px;">Chat History</h3>
+                <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-color);">
+                    <h3 style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px;">Chat History</h3>
                 </div>
                 <ul class="chat-history-list" style="list-style: none; padding: 0; margin: 0; flex: 1; overflow-y: auto;"></ul>
                 
                 <!-- Study Tools Section -->
-                <div style="padding: 16px 20px; border-top: 1px solid #e5e7eb; border-bottom: 1px solid #e5e7eb;">
-                    <h3 style="font-size: 0.75rem; text-transform: uppercase; color: #6b7280; letter-spacing: 1px; margin-bottom: 12px;">Study Tools</h3>
+                <div style="padding: 16px 20px; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
+                    <h3 style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 12px;">Study Tools</h3>
                     <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <li class="menu-item" data-action="lecture-notes" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: #20242d; border-radius: 6px;"><span class="menu-icon">📄</span> <span style="font-size: 0.9rem;">Lecture Notes</span></li>
-                        <li class="menu-item" data-action="flashcards" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: #20242d; border-radius: 6px;"><span class="menu-icon">🗃️</span> <span style="font-size: 0.9rem;">Flashcards</span></li>
-                        <li class="menu-item" data-action="study-plans" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: #20242d; border-radius: 6px;"><span class="menu-icon">📅</span> <span style="font-size: 0.9rem;">Study Plans</span></li>
+                        <li class="menu-item" data-action="lecture-notes" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-dark); border-radius: 6px;"><span class="menu-icon">📄</span> <span style="font-size: 0.9rem;">Lecture Notes</span></li>
+                        <li class="menu-item" data-action="flashcards" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-dark); border-radius: 6px;"><span class="menu-icon">🗃️</span> <span style="font-size: 0.9rem;">Flashcards</span></li>
+                        <li class="menu-item" data-action="study-plans" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-dark); border-radius: 6px;"><span class="menu-icon">📅</span> <span style="font-size: 0.9rem;">Study Plans</span></li>
                     </div>
                 </div>
                 
                 <!-- Settings Section -->
                 <div style="padding: 16px 20px;">
-                    <li class="menu-item" data-action="settings" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: #20242d; border-radius: 6px;"><span class="menu-icon">⚙️</span> <span style="font-size: 0.9rem;">Settings</span></li>
+                    <li class="menu-item" data-action="settings" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-dark); border-radius: 6px;"><span class="menu-icon">⚙️</span> <span style="font-size: 0.9rem;">Settings</span></li>
                 </div>
             </aside>
             
-            <main class="right-sidebar" style="flex: 1; overflow: hidden; display: flex; background-color: #f4f5f7; padding: 0;">
+            <main style="flex: 1; overflow: hidden; display: flex; background: var(--bg-app); padding: 0;">
                 
                 <!-- Chat Section -->
-                <div class="chat-view" id="chat-view" style="flex: 1; display: flex; flex-direction: column; min-width: 0; background: white; margin: 16px; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
-                    <div class="chat-title-header" style="padding: 16px 20px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
-                        <h2 id="chat-title" style="font-size: 1.15rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">Chat: Data Structures - Trees & Graphs</h2>
+                <div class="chat-section chat-view" id="chat-view" style="margin: 16px; border-radius: 12px; box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); display: flex; flex-direction: column; flex: 1;">
+                    <div class="chat-title-header" style="display: flex; justify-content: space-between; align-items: center;">
+                        <h2 id="chat-title" style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">EduChat</h2>
                         <button id="tools-toggle" class="nav-toggle-btn" title="Quick Tools">🛠️</button>
                     </div>
                     
-                    <div class="messages-container" id="messages-container" style="padding: 24px 32px; gap: 20px;">
+                    <div class="messages-container" id="messages-container" style="flex: 1; overflow-y: auto;">
                         <div class="bot-header" style="display:none;"></div>
                     </div>
                     
-                    <div class="chat-input-area" style="padding: 20px 32px;">
-                        <div class="input-box-wrapper" style="border: 1.5px solid #c8b384; border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
-                            <textarea id="chat-input" placeholder="Ask EduChat about Trees..." rows="1" style="border: none; outline: none; width: 100%; resize: none; font-family: inherit; font-size: 0.95rem;"></textarea>
+                    <div class="input-area-container">
+                        <div class="input-box-wrapper">
+                            <textarea id="chat-input" placeholder="Ask EduChat about Trees..." rows="1"></textarea>
                             <div class="attachments-preview" id="attachments-preview"></div>
                             
-                            <div class="input-toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px;">
-                                <div class="toolbar-left" style="display: flex; gap: 8px;">
-                                    <label for="file-input" class="icon-btn label-btn" title="Upload from device" style="background: none;">📄</label>
+                            <div class="input-toolbar">
+                                <div class="toolbar-left">
+                                    <label for="file-input" class="icon-btn label-btn" title="Upload from device">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+</label>
                                     <input type="file" id="file-input" accept=".txt,.pdf,.doc,.docx,.ppt,.pptx,.png,.jpg,.jpeg,.gif,.mp3,.wav,.mp4,.webm" multiple hidden>
-                                    <button class="icon-btn" id="attach-from-notes" title="Attach from saved notes" style="background: none;">📎</button>
+                                    <button class="icon-btn" id="attach-from-notes" title="Attach from saved notes">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+</button>
                                 </div>
-                                <div class="toolbar-right" style="display: flex; gap: 8px; align-items: center;">
-                                    <button class="icon-btn" id="clear-attachments" title="Clear attachments" style="display: none; background: #fee2e2; color: #dc2626;">✕</button>
-                                    <button class="icon-btn" id="voice-btn" title="Voice input" style="background: none; border-radius: 50%; border: 1px solid #e5e7eb;">🎤</button>
-                                    <button class="send-btn" id="send-btn" style="background-color: #14284b; color: white; border-radius: 20px; padding: 6px 16px; margin-left: 8px; font-weight: 500;">Send →</button>
+                                <div class="toolbar-right">
+                                    <button class="icon-btn" id="clear-attachments" title="Clear attachments" style="display: none; background: rgba(255,77,109,0.15); color: var(--danger); border-color: var(--danger);">✕</button>
+                                    <button class="icon-btn" id="voice-btn" title="Voice input">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+</button>
+                                    <button class="send-btn" id="send-btn">Send →</button>
                                 </div>
                             </div>
                         </div>
@@ -519,24 +568,16 @@ document.querySelector('#app').innerHTML = `
                 </div>
                 
                 <!-- Right Sidebar - Quick Tools -->
-                <div class="quick-tools-sidebar" style="width: 280px; background: white; padding: 24px; display: flex; flex-direction: column; gap: 16px; margin: 16px 16px 16px 0; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.05);">
+                <div class="right-sidebar quick-tools-sidebar" style="margin: 16px 16px 16px 0; border-radius: 12px; box-shadow: var(--shadow-sm); border: 1px solid var(--border-color); display: flex; flex-direction: column;">
                     <button class="sidebar-close-btn" id="right-sidebar-close" title="Close tools">&times;</button>
-                    <h3 style="font-size: 0.85rem; text-transform: uppercase; font-weight: 600; color: #374151; letter-spacing: 1px; margin-bottom: 8px;">Quick Tools</h3>
+                    <h3 class="quick-tools-title">Quick Tools</h3>
                     
-                    <button class="tool-btn" id="quick-flashcard" style="padding: 10px; background: white; border: 1px solid #e5e7eb; border-radius: 20px; cursor: pointer; text-align: center; font-weight: 500; font-size: 0.9rem; color: #374151;">
-                        Create Flashcard
-                    </button>
-                    
-                    <button class="tool-btn" id="quick-summarize" style="padding: 10px; background: white; border: 1px solid #e5e7eb; border-radius: 20px; cursor: pointer; text-align: center; font-weight: 500; font-size: 0.9rem; color: #374151;">
-                        Summarize Notes
-                    </button>
-                    
-                    <button class="tool-btn" id="quick-quiz" style="padding: 10px; background: white; border: 1px solid #e5e7eb; border-radius: 20px; cursor: pointer; text-align: center; font-weight: 500; font-size: 0.9rem; color: #374151;">
-                        Generate Quiz
-                    </button>
+                    <div class="tools-list">
+                        <button class="tool-btn" id="quick-flashcard">Create Flashcard</button>
+                        <button class="tool-btn" id="quick-summarize">Summarize Notes</button>
+                        <button class="tool-btn" id="quick-quiz">Generate Quiz</button>
+                    </div>
                 </div>
-                
-            </main>
                 
             </main>
         </div>
@@ -552,12 +593,10 @@ const chatInput = document.getElementById('chat-input');
 // Responsive Sidebar Toggles
 const sidebarToggle = document.getElementById('sidebar-toggle');
 const toolsToggle = document.getElementById('tools-toggle');
-const searchToggleMobile = document.getElementById('search-toggle-mobile');
 const sidebarOverlay = document.getElementById('sidebar-overlay');
 const leftSidebar = document.querySelector('.left-sidebar');
 const rightSidebar = document.querySelector('.quick-tools-sidebar');
 const rightSidebarContainer = document.querySelector('.right-sidebar');
-const searchSection = document.querySelector('.search-section');
 
 function toggleLeftSidebar() {
     leftSidebar.classList.toggle('active');
@@ -587,10 +626,6 @@ sidebarOverlay?.addEventListener('click', closeAllSidebars);
 document.getElementById('left-sidebar-close')?.addEventListener('click', closeAllSidebars);
 document.getElementById('right-sidebar-close')?.addEventListener('click', closeAllSidebars);
 
-searchToggleMobile?.addEventListener('click', () => {
-    searchSection.classList.toggle('mobile-visible');
-});
-
 // Close sidebars on menu item click (mobile)
 document.querySelectorAll('.menu-item, .chat-history-item').forEach(item => {
     item.addEventListener('click', () => {
@@ -605,7 +640,6 @@ function handleResize() {
     // Close sidebars on resize to large screens
     if (width > 1024) {
         closeAllSidebars();
-        searchSection.classList.remove('mobile-visible');
     }
     
     // Update chat title based on screen
@@ -885,15 +919,35 @@ if (voiceBtn && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in w
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.lang = 'en-US';
+
+    const micIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>';
+    const recordingIcon = '<svg width="18" height="18" viewBox="0 0 24 24" fill="#ef4444"><circle cx="12" cy="12" r="6"/></svg>';
+
+    function startVoiceInput() {
+        if (navigator.permissions && navigator.permissions.query) {
+            navigator.permissions.query({ name: 'microphone' }).then(result => {
+                if (result.state === 'denied') {
+                    showToast('Microphone access is blocked — enable mic in browser settings to use voice input', 'error');
+                    return;
+                }
+                try { recognition.start(); } catch (e) {
+                    showToast('Microphone unavailable — check your device and try again', 'error');
+                }
+            }).catch(() => {
+                try { recognition.start(); } catch (e) {
+                    showToast('Microphone unavailable — check your device and try again', 'error');
+                }
+            });
+        } else {
+            try { recognition.start(); } catch (e) {
+                showToast('Microphone unavailable — check your device and try again', 'error');
+            }
+        }
+    }
     
     recognition.onstart = () => {
         voiceBtn.style.background = '#fee2e2';
-        voiceBtn.textContent = '🔴';
-    };
-    
-    recognition.onend = () => {
-        voiceBtn.style.background = '';
-        voiceBtn.textContent = '🎤';
+        voiceBtn.innerHTML = recordingIcon;
     };
     
     recognition.onresult = (event) => {
@@ -901,7 +955,32 @@ if (voiceBtn && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in w
         chatInput.value = transcript;
     };
     
-    voiceBtn.addEventListener('click', () => recognition.start());
+    recognition.onend = () => {
+        voiceBtn.style.background = '';
+        voiceBtn.innerHTML = micIcon;
+        if (chatInput.value.trim()) {
+            chatInput.focus();
+            chatInput.parentElement.style.transition = 'box-shadow 0.3s ease, border-color 0.3s ease';
+            chatInput.parentElement.style.borderColor = 'var(--primary)';
+            chatInput.parentElement.style.boxShadow = '0 0 0 3px rgba(108,99,255,0.3)';
+            setTimeout(() => {
+                chatInput.parentElement.style.borderColor = '';
+                chatInput.parentElement.style.boxShadow = '';
+            }, 2000);
+        }
+    };
+    
+    recognition.onerror = (event) => {
+        voiceBtn.style.background = '';
+        voiceBtn.innerHTML = micIcon;
+        const messages = {
+            'not-allowed': 'Microphone access denied — allow mic permissions and try again',
+            'no-speech': 'No speech detected — speak clearly and try again',
+        };
+        showToast(messages[event.error] || 'Voice input failed — check your mic and try again', 'error');
+    };
+    
+    voiceBtn.addEventListener('click', startVoiceInput);
 }
 
 async function sendMessage() {
@@ -964,13 +1043,14 @@ async function sendMessage() {
         if (data.reply) {
             addMessage(data.reply, false);
             if (currentSessionId && message && isNewChat) {
-                const title = message.split(' ').slice(0, 4).join(' ');
-                const shortTitle = title.length > 25 ? title.substring(0, 25) + '...' : title;
-                fetch(API_BASE + '/api/chat/session/' + currentSessionId, {
-                    method: 'PUT',
-                    headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
-                    body: `title=${encodeURIComponent(shortTitle)}`
-                }).then(() => loadChatHistory());
+                const title = generateChatTitle(message);
+                if (title) {
+                    fetch(API_BASE + '/api/chat/session/' + currentSessionId, {
+                        method: 'PUT',
+                        headers: { ...getAuthHeaders(), 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `title=${encodeURIComponent(title)}`
+                    }).then(() => loadChatHistory());
+                }
                 isNewChat = false;
             }
         } else if (data.error) {

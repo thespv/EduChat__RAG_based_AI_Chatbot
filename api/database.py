@@ -27,7 +27,12 @@ def get_pg_connection():
             except:
                 pg_conn = None
         
-        pg_conn = psycopg2.connect(DATABASE_URL)
+        # Render provides postgres:// urls, but psycopg2 prefers postgresql://
+        url = DATABASE_URL
+        if url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql://", 1)
+            
+        pg_conn = psycopg2.connect(url)
         pg_conn.autocommit = True
         return pg_conn
     except Exception as e:
@@ -46,7 +51,7 @@ def init_sqlite():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Users table for authentication
+    # Users table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -105,26 +110,10 @@ def init_postgres():
     
     cursor = conn.cursor()
     
-    # Check if migration already done
+    # Check for migration
     try:
         cursor.execute("SELECT tablename FROM pg_tables WHERE tablename = 'schema_migrations'")
-        migration_done = cursor.fetchone()
-        
-        if not migration_done:
-            # Check if old schema exists and needs migration
-            cursor.execute("SELECT column_name FROM information_schema.columns WHERE table_name = 'chat_sessions' AND column_name = 'id'")
-            old_schema = cursor.fetchone()
-            
-            if old_schema:
-                # Old schema exists, drop and recreate
-                print("Migrating database schema...")
-                cursor.execute("DROP TABLE IF EXISTS chat_messages CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS chat_sessions CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS lecture_notes CASCADE")
-                cursor.execute("DROP TABLE IF EXISTS users CASCADE")
-                conn.commit()
-            
-            # Create migration tracking table
+        if not cursor.fetchone():
             cursor.execute("""
                 CREATE TABLE schema_migrations (
                     id SERIAL PRIMARY KEY,
@@ -134,11 +123,10 @@ def init_postgres():
             """)
             cursor.execute("INSERT INTO schema_migrations (migration_name) VALUES ('initial_schema')")
             conn.commit()
-            print("Database migration completed")
     except Exception as e:
-        print(f"Migration check error (may be first run): {e}")
+        print(f"Migration check error: {e}")
     
-    # Users table for authentication
+    # Users table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id SERIAL PRIMARY KEY,
@@ -188,538 +176,132 @@ def init_postgres():
     conn.commit()
     cursor.close()
 
-# ============================================================
-# User Authentication Functions
-# ============================================================
-
-def create_user(email: str, password_hash: str, name: str, verification_token: str = None) -> int:
-        add_message_sqlite(session_id, role, content)
-
-def add_message_sqlite(session_id: int, role: str, content: str):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)", (session_id, role, content))
-    cursor.execute("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
-    conn.commit()
-    conn.close()
-
-def add_message_pg(session_id: int, role: str, content: str):
-    conn = get_pg_connection()
-    if not conn:
-        add_message_sqlite(session_id, role, content)
-        return
-    
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_messages (session_id, \"role\", content) VALUES (%s, %s, %s)", (session_id, role, content))
-    cursor.execute("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (session_id,))
-    conn.commit()
-    cursor.close()
-
-def update_session_title(session_id: int, user_id: int, title: str):
+# Operation helpers to reduce duplication
+def execute_query(query, params=(), fetchone=False, fetchall=False, commit=True):
     if DATABASE_URL:
-        update_session_title_pg(session_id, user_id, title)
+        conn = get_pg_connection()
+        if not conn: return None
+        # Convert ? to %s for PostgreSQL
+        query = query.replace("?", "%s")
     else:
-        update_session_title_sqlite(session_id, user_id, title)
-
-def update_session_title_sqlite(session_id: int, user_id: int, title: str):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?", (title, session_id, user_id))
-    conn.commit()
-    conn.close()
-
-def update_session_title_pg(session_id: int, user_id: int, title: str):
-    conn = get_pg_connection()
-    if not conn:
-        update_session_title_sqlite(session_id, user_id, title)
-        return
+        conn = sqlite3.connect(DB_PATH)
     
-    cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET title = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND user_id = %s", (title, session_id, user_id))
-    conn.commit()
-    cursor.close()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        
+        result = None
+        if fetchone:
+            result = cursor.fetchone()
+        elif fetchall:
+            result = cursor.fetchall()
+        elif "RETURNING id" in query or "returning id" in query.lower():
+            result = cursor.fetchone()
+        elif not DATABASE_URL and ("INSERT" in query.upper() or "REPLACE" in query.upper()):
+            result = [cursor.lastrowid] # Wrap in list to match pg fetchone pattern
+            
+        if commit:
+            conn.commit()
+        
+        if DATABASE_URL:
+            cursor.close()
+        else:
+            conn.close()
+            
+        return result
+    except Exception as e:
+        print(f"Database query failed: {e}")
+        if not DATABASE_URL: conn.close()
+        return None
 
-def delete_session(session_id: int, user_id: int = None):
-    if DATABASE_URL:
-        delete_session_pg(session_id, user_id)
-    else:
-        delete_session_sqlite(session_id, user_id)
+def save_lecture_note(user_id: int, name: str, content: str, file_type: str) -> int:
+    query = "INSERT INTO lecture_notes (user_id, name, content, file_type) VALUES (?, ?, ?, ?) RETURNING id" if DATABASE_URL else "INSERT INTO lecture_notes (user_id, name, content, file_type) VALUES (?, ?, ?, ?)"
+    res = execute_query(query, (user_id, name, content, file_type))
+    return res[0] if res else None
 
-def delete_session_sqlite(session_id: int, user_id: int = None):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    if user_id:
-        cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
-        cursor.execute("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
-    else:
-        cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
-        cursor.execute("DELETE FROM chat_sessions WHERE id = ?", (session_id,))
-    conn.commit()
-    conn.close()
-
-def delete_session_pg(session_id: int, user_id: int = None):
-    conn = get_pg_connection()
-    if not conn:
-        delete_session_sqlite(session_id, user_id)
-        return
-    
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM chat_messages WHERE session_id = %s", (session_id,))
-    if user_id:
-        cursor.execute("DELETE FROM chat_sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
-    else:
-        cursor.execute("DELETE FROM chat_sessions WHERE id = %s", (session_id,))
-    conn.commit()
-    cursor.close()
-
-def save_lecture_note(user: str, name: str, content: str, file_type: str) -> int:
-    if DATABASE_URL:
-        return save_lecture_note_pg(user, name, content, file_type)
-    return save_lecture_note_sqlite(user, name, content, file_type)
-
-def save_lecture_note_sqlite(user: str, name: str, content: str, file_type: str) -> int:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO lecture_notes (user, name, content, file_type) VALUES (?, ?, ?, ?)", (user, name, content, file_type))
-    note_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    return note_id
-
-def save_lecture_note_pg(user: str, name: str, content: str, file_type: str) -> int:
-    conn = get_pg_connection()
-    if not conn:
-        return save_lecture_note_sqlite(user, name, content, file_type)
-    
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO lecture_notes (\"user\", name, content, file_type) VALUES (%s, %s, %s, %s) RETURNING id", (user, name, content, file_type))
-    note_id = cursor.fetchone()[0]
-    conn.commit()
-    cursor.close()
-    return note_id
-
-def get_lecture_notes(user: str) -> list:
-    if DATABASE_URL:
-        return get_lecture_notes_pg(user)
-    return get_lecture_notes_sqlite(user)
+def get_lecture_notes(user_id: int) -> list:
+    res = execute_query("SELECT id, name, content, file_type, created_at FROM lecture_notes WHERE user_id = ? ORDER BY created_at DESC", (user_id,), fetchall=True)
+    if not res: return []
+    return [{"id": r[0], "name": r[1], "content": r[2], "file_type": r[3], "created_at": str(r[4])} for r in res]
 
 def get_lecture_note_by_id(note_id: int) -> dict:
-    if DATABASE_URL:
-        return get_lecture_note_by_id_pg(note_id)
-    return get_lecture_note_by_id_sqlite(note_id)
-
-def get_lecture_note_by_id_sqlite(note_id: int) -> dict:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, content, file_type, created_at FROM lecture_notes WHERE id = ?", (note_id,))
-    r = cursor.fetchone()
-    conn.close()
-    if r:
-        return {"id": r[0], "name": r[1], "content": r[2], "file_type": r[3], "created_at": r[4]}
-    return None
-
-def get_lecture_note_by_id_pg(note_id: int) -> dict:
-    conn = get_pg_connection()
-    if not conn:
-        return get_lecture_note_by_id_sqlite(note_id)
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, content, file_type, created_at FROM lecture_notes WHERE id = %s", (note_id,))
-    r = cursor.fetchone()
-    cursor.close()
-    if r:
-        return {"id": r[0], "name": r[1], "content": r[2], "file_type": r[3], "created_at": str(r[4])}
-    return None
-
-def get_lecture_notes_sqlite(user: str) -> list:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, content, file_type, created_at FROM lecture_notes WHERE user = ? ORDER BY created_at DESC", (user,))
-    notes = [{"id": r[0], "name": r[1], "content": r[2], "file_type": r[3], "created_at": r[4]} for r in cursor.fetchall()]
-    conn.close()
-    return notes
-
-def get_lecture_notes_pg(user: str) -> list:
-    conn = get_pg_connection()
-    if not conn:
-        return get_lecture_notes_sqlite(user)
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, content, file_type, created_at FROM lecture_notes WHERE \"user\" = %s ORDER BY created_at DESC", (user,))
-    notes = [{"id": r[0], "name": r[1], "content": r[2], "file_type": r[3], "created_at": str(r[4])} for r in cursor.fetchall()]
-    cursor.close()
-    return notes
+    res = execute_query("SELECT id, name, content, file_type, created_at FROM lecture_notes WHERE id = ?", (note_id,), fetchone=True)
+    if not res: return None
+    return {"id": res[0], "name": res[1], "content": res[2], "file_type": res[3], "created_at": str(res[4])}
 
 def delete_lecture_note(note_id: int):
+    execute_query("DELETE FROM lecture_notes WHERE id = ?", (note_id,))
+
+def create_user(email: str, password_hash: str, name: str, verification_token: str = None) -> int:
+    query = "INSERT INTO users (email, password_hash, name, verification_token) VALUES (?, ?, ?, ?) RETURNING id" if DATABASE_URL else "INSERT INTO users (email, password_hash, name, verification_token) VALUES (?, ?, ?, ?)"
+    res = execute_query(query, (email, password_hash, name, verification_token))
+    return res[0] if res else None
+
+def get_user_by_email(email: str) -> dict:
+    res = execute_query("SELECT id, email, password_hash, name, verified, verification_token, created_at FROM users WHERE email = ?", (email,), fetchone=True)
+    if not res: return None
+    return {"id": res[0], "email": res[1], "password_hash": res[2], "name": res[3], "verified": bool(res[4]), "verification_token": res[5], "created_at": str(res[6])}
+
+def get_user_by_id(user_id: int) -> dict:
+    res = execute_query("SELECT id, email, name, verified, created_at FROM users WHERE id = ?", (user_id,), fetchone=True)
+    if not res: return None
+    return {"id": res[0], "email": res[1], "name": res[2], "verified": bool(res[3]), "created_at": str(res[4])}
+
+def verify_user(token: str) -> bool:
+    # Postgre uses TRUE, SQLite uses 1
+    val = "TRUE" if DATABASE_URL else 1
+    query = f"UPDATE users SET verified = {val}, verification_token = NULL WHERE verification_token = ?"
+    # execute_query returns None for update, so we need rowcount which is not in our helper yet.
+    # For now, keep it simple and just do it manually or adapt helper.
+    # Actually, rowcount is needed. Let's stick to the current specific implementations for verify to be sure.
     if DATABASE_URL:
-        delete_lecture_note_pg(note_id)
+        conn = get_pg_connection()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET verified = TRUE, verification_token = NULL WHERE verification_token = %s", (token,))
+        updated = cursor.rowcount > 0
+        cursor.close()
     else:
-        delete_lecture_note_sqlite(note_id)
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE users SET verified = 1, verification_token = NULL WHERE verification_token = ?", (token,))
+        conn.commit()
+        updated = cursor.rowcount > 0
+        conn.close()
+    return updated
 
-def delete_lecture_note_sqlite(note_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM lecture_notes WHERE id = ?", (note_id,))
-    conn.commit()
-    conn.close()
+def user_exists(email: str) -> bool:
+    return get_user_by_email(email) is not None
 
-def delete_lecture_note_pg(note_id: int):
-    conn = get_pg_connection()
-    if not conn:
-        delete_lecture_note_sqlite(note_id)
-        return
+def create_session(user_id: int, title: str = "New Chat") -> int:
+    query = "INSERT INTO chat_sessions (user_id, title) VALUES (?, ?) RETURNING id" if DATABASE_URL else "INSERT INTO chat_sessions (user_id, title) VALUES (?, ?)"
+    res = execute_query(query, (user_id, title))
+    return res[0] if res else None
+
+def get_sessions(user_id: int) -> list:
+    res = execute_query("SELECT id, title, created_at, updated_at FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,), fetchall=True)
+    if not res: return []
+    return [{"id": r[0], "title": r[1], "created_at": str(r[2]), "updated_at": str(r[3])} for r in res]
+
+def get_session(session_id: int, user_id: int) -> dict:
+    session = execute_query("SELECT id, user_id, title, created_at FROM chat_sessions WHERE id = ? AND user_id = ?", (session_id, user_id), fetchone=True)
+    if not session: return None
     
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM lecture_notes WHERE id = %s", (note_id,))
-    conn.commit()
-    cursor.close()
+    msgs = execute_query("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,), fetchall=True)
+    messages = [{"role": m[0], "content": m[1], "created_at": str(m[2])} for m in msgs] if msgs else []
+    
+    return {"id": session[0], "user_id": session[1], "title": session[2], "created_at": str(session[3]), "messages": messages}
+
+def delete_session(session_id: int, user_id: int):
+    execute_query("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
+    execute_query("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
+
+def update_session_title(session_id: int, user_id: int, title: str):
+    execute_query("UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?", (title, session_id, user_id))
+
+def add_message(session_id: int, role: str, content: str):
+    execute_query("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)", (session_id, role, content))
+    execute_query("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
 
 if __name__ == "__main__":
     init_db()
     print("Database initialized!")
-
-# ============================================================
-# User Authentication Functions
-# ============================================================
-
-def create_user(email: str, password_hash: str, name: str, verification_token: str = None) -> int:
-    """Create a new user"""
-    if DATABASE_URL:
-        return create_user_pg(email, password_hash, name, verification_token)
-    return create_user_sqlite(email, password_hash, name, verification_token)
-
-def create_user_sqlite(email: str, password_hash: str, name: str, verification_token: str = None) -> int:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO users (email, password_hash, name, verification_token) VALUES (?, ?, ?, ?)",
-        (email, password_hash, name, verification_token)
-    )
-    conn.commit()
-    user_id = cursor.lastrowid
-    conn.close()
-    return user_id
-
-def create_user_pg(email: str, password_hash: str, name: str, verification_token: str = None) -> int:
-    conn = get_pg_connection()
-    if not conn:
-        return create_user_sqlite(email, password_hash, name, verification_token)
-    
-    cursor = conn.cursor()
-    cursor.execute(
-        "INSERT INTO users (email, password_hash, name, verification_token) VALUES (%s, %s, %s, %s) RETURNING id",
-        (email, password_hash, name, verification_token)
-    )
-    user_id = cursor.fetchone()[0]
-    conn.commit()
-    cursor.close()
-    return user_id
-
-def get_user_by_email(email: str) -> dict:
-    """Get user by email"""
-    if DATABASE_URL:
-        return get_user_by_email_pg(email)
-    return get_user_by_email_sqlite(email)
-
-def get_user_by_email_sqlite(email: str) -> dict:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, email, password_hash, name, verified, verification_token, created_at FROM users WHERE email = ?", (email,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"id": row[0], "email": row[1], "password_hash": row[2], "name": row[3], "verified": bool(row[4]), "verification_token": row[5], "created_at": row[6]}
-
-def get_user_by_email_pg(email: str) -> dict:
-    conn = get_pg_connection()
-    if not conn:
-        return get_user_by_email_sqlite(email)
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, email, password_hash, name, verified, verification_token, created_at FROM users WHERE email = %s", (email,))
-    row = cursor.fetchone()
-    cursor.close()
-    if not row:
-        return None
-    return {"id": row[0], "email": row[1], "password_hash": row[2], "name": row[3], "verified": row[4], "verification_token": row[5], "created_at": str(row[6])}
-
-def get_user_by_id(user_id: int) -> dict:
-    """Get user by ID"""
-    if DATABASE_URL:
-        return get_user_by_id_pg(user_id)
-    return get_user_by_id_sqlite(user_id)
-
-def get_user_by_id_sqlite(user_id: int) -> dict:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, email, name, verified, created_at FROM users WHERE id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if not row:
-        return None
-    return {"id": row[0], "email": row[1], "name": row[2], "verified": bool(row[3]), "created_at": row[4]}
-
-def get_user_by_id_pg(user_id: int) -> dict:
-    conn = get_pg_connection()
-    if not conn:
-        return get_user_by_id_sqlite(user_id)
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, email, name, verified, created_at FROM users WHERE id = %s", (user_id,))
-    row = cursor.fetchone()
-    cursor.close()
-    if not row:
-        return None
-    return {"id": row[0], "email": row[1], "name": row[2], "verified": row[3], "created_at": str(row[4])}
-
-def verify_user(token: str) -> bool:
-    """Verify user email with token"""
-    if DATABASE_URL:
-        return verify_user_pg(token)
-    return verify_user_sqlite(token)
-
-def verify_user_sqlite(token: str) -> bool:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET verified = 1, verification_token = NULL WHERE verification_token = ?", (token,))
-    conn.commit()
-    updated = cursor.rowcount > 0
-    conn.close()
-    return updated
-
-def verify_user_pg(token: str) -> bool:
-    conn = get_pg_connection()
-    if not conn:
-        return verify_user_sqlite(token)
-    
-    cursor = conn.cursor()
-    cursor.execute("UPDATE users SET verified = TRUE, verification_token = NULL WHERE verification_token = %s", (token,))
-    conn.commit()
-    updated = cursor.rowcount > 0
-    cursor.close()
-    return updated
-
-def user_exists(email: str) -> bool:
-    """Check if user exists"""
-    user = get_user_by_email(email)
-    return user is not None
-
-# ============================================================
-# Sessions - Updated for user_id based
-# ============================================================
-
-def create_session(user_id: int, title: str = "New Chat") -> int:
-    """Create a new chat session"""
-    if DATABASE_URL:
-        return create_session_pg(user_id, title)
-    return create_session_sqlite(user_id, title)
-
-def create_session_sqlite(user_id: int, title: str) -> int:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_sessions (user_id, title) VALUES (?, ?)", (user_id, title))
-    conn.commit()
-    session_id = cursor.lastrowid
-    conn.close()
-    return session_id
-
-def create_session_pg(user_id: int, title: str) -> int:
-    conn = get_pg_connection()
-    if not conn:
-        return create_session_sqlite(user_id, title)
-    
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_sessions (user_id, title) VALUES (%s, %s) RETURNING id", (user_id, title))
-    session_id = cursor.fetchone()[0]
-    conn.commit()
-    cursor.close()
-    return session_id
-
-def get_sessions(user_id: int) -> list:
-    """Get all sessions for a user"""
-    if DATABASE_URL:
-        return get_sessions_pg(user_id)
-    return get_sessions_sqlite(user_id)
-
-def get_sessions_sqlite(user_id: int) -> list:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, created_at, updated_at FROM chat_sessions WHERE user_id = ? ORDER BY updated_at DESC", (user_id,))
-    sessions = [{"id": row[0], "title": row[1], "created_at": row[2], "updated_at": row[3]} for row in cursor.fetchall()]
-    conn.close()
-    return sessions
-
-def get_sessions_pg(user_id: int) -> list:
-    conn = get_pg_connection()
-    if not conn:
-        return get_sessions_sqlite(user_id)
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, title, created_at, updated_at FROM chat_sessions WHERE user_id = %s ORDER BY updated_at DESC", (user_id,))
-    sessions = [{"id": row[0], "title": row[1], "created_at": str(row[2]), "updated_at": str(row[3])} for row in cursor.fetchall()]
-    cursor.close()
-    return sessions
-
-def get_session(session_id: int, user_id: int) -> dict:
-    """Get a specific session"""
-    if DATABASE_URL:
-        return get_session_pg(session_id, user_id)
-    return get_session_sqlite(session_id, user_id)
-
-def get_session_sqlite(session_id: int, user_id: int) -> dict:
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, user_id, title, created_at FROM chat_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
-    row = cursor.fetchone()
-    if not row:
-        conn.close()
-        return None
-    
-    cursor.execute("SELECT role, content, created_at FROM chat_messages WHERE session_id = ? ORDER BY created_at ASC", (session_id,))
-    messages = [{"role": m[0], "content": m[1], "created_at": m[2]} for m in cursor.fetchall()]
-    conn.close()
-    return {"id": row[0], "user_id": row[1], "title": row[2], "created_at": row[3], "messages": messages}
-
-def get_session_pg(session_id: int, user_id: int) -> dict:
-    conn = get_pg_connection()
-    if not conn:
-        return get_session_sqlite(session_id, user_id)
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, user_id, title, created_at FROM chat_sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
-    row = cursor.fetchone()
-    if not row:
-        cursor.close()
-        return None
-    
-    cursor.execute("SELECT role, content, created_at FROM chat_messages WHERE session_id = %s ORDER BY created_at ASC", (session_id,))
-    messages = [{"role": m[0], "content": m[1], "created_at": str(m[2])} for m in cursor.fetchall()]
-    cursor.close()
-    return {"id": row[0], "user_id": row[1], "title": row[2], "created_at": str(row[3]), "messages": messages}
-
-def get_notes(user_id: int):
-    """Get lecture notes for a user"""
-    if DATABASE_URL:
-        return get_notes_pg(user_id)
-    return get_notes_sqlite(user_id)
-
-def get_notes_sqlite(user_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, file_type, created_at FROM lecture_notes WHERE user_id = ? ORDER BY created_at DESC", (user_id,))
-    notes = [{"id": row[0], "name": row[1], "file_type": row[2], "created_at": row[3]} for row in cursor.fetchall()]
-    conn.close()
-    return notes
-
-def get_notes_pg(user_id: int):
-    conn = get_pg_connection()
-    if not conn:
-        return get_notes_sqlite(user_id)
-    
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, name, file_type, created_at FROM lecture_notes WHERE user_id = %s ORDER BY created_at DESC", (user_id,))
-    notes = [{"id": row[0], "name": row[1], "file_type": row[2], "created_at": str(row[3])} for row in cursor.fetchall()]
-    cursor.close()
-    return notes
-
-def delete_session(session_id: int, user_id: int):
-    """Delete a session"""
-    if DATABASE_URL:
-        delete_session_pg(session_id, user_id)
-    else:
-        delete_session_sqlite(session_id, user_id)
-
-def delete_session_sqlite(session_id: int, user_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM chat_messages WHERE session_id = ?", (session_id,))
-    cursor.execute("DELETE FROM chat_sessions WHERE id = ? AND user_id = ?", (session_id, user_id))
-    conn.commit()
-    conn.close()
-
-def delete_session_pg(session_id: int, user_id: int):
-    conn = get_pg_connection()
-    if not conn:
-        delete_session_sqlite(session_id, user_id)
-        return
-    
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM chat_messages WHERE session_id = %s", (session_id,))
-    cursor.execute("DELETE FROM chat_sessions WHERE id = %s AND user_id = %s", (session_id, user_id))
-    conn.commit()
-    cursor.close()
-
-def update_session_title(session_id: int, user_id: int, title: str):
-    """Update session title"""
-    if DATABASE_URL:
-        update_session_title_pg(session_id, user_id, title)
-    else:
-        update_session_title_sqlite(session_id, user_id, title)
-
-def update_session_title_sqlite(session_id: int, user_id: int, title: str):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET title = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?", (title, session_id, user_id))
-    conn.commit()
-    conn.close()
-
-def update_session_title_pg(session_id: int, user_id: int, title: str):
-    conn = get_pg_connection()
-    if not conn:
-        update_session_title_sqlite(session_id, user_id, title)
-        return
-    
-    cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET title = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s AND user_id = %s", (title, session_id, user_id))
-    conn.commit()
-    cursor.close()
-
-def add_message(session_id: int, role: str, content: str):
-    """Add message to session"""
-    if DATABASE_URL:
-        add_message_pg(session_id, role, content)
-    else:
-        add_message_sqlite(session_id, role, content)
-    
-    # Update session timestamp
-    if DATABASE_URL:
-        update_session_timestamp_pg(session_id)
-    else:
-        update_session_timestamp_sqlite(session_id)
-
-def add_message_sqlite(session_id: int, role: str, content: str):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_messages (session_id, role, content) VALUES (?, ?, ?)", (session_id, role, content))
-    conn.commit()
-    conn.close()
-
-def add_message_pg(session_id: int, role: str, content: str):
-    conn = get_pg_connection()
-    if not conn:
-        add_message_sqlite(session_id, role, content)
-        return
-    
-    cursor = conn.cursor()
-    cursor.execute("INSERT INTO chat_messages (session_id, role, content) VALUES (%s, %s, %s)", (session_id, role, content))
-    conn.commit()
-    cursor.close()
-
-def update_session_timestamp_sqlite(session_id: int):
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = ?", (session_id,))
-    conn.commit()
-    conn.close()
-
-def update_session_timestamp_pg(session_id: int):
-    conn = get_pg_connection()
-    if not conn:
-        update_session_timestamp_sqlite(session_id)
-        return
-    
-    cursor = conn.cursor()
-    cursor.execute("UPDATE chat_sessions SET updated_at = CURRENT_TIMESTAMP WHERE id = %s", (session_id,))
-    conn.commit()
-    cursor.close()

@@ -1,6 +1,7 @@
 import os
 import httpx
-from typing import Optional, List, Dict, Any
+import re
+from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -21,17 +22,7 @@ class APIManager:
         self.anthropic_key = os.getenv("ANTHROPIC_API_KEY", "")
         self.openai_key = os.getenv("OPENAI_API_KEY", "")
         self._active_provider = "gemini"
-        
-        print(f"APIManager initialized:")
-        print(f"  - Gemini keys: {len(self.gemini_keys)}")
-        if self.groq_key:
-            print(f"  - Groq key: {self.groq_key[:15]}...")
-        else:
-            print(f"  - Groq key: NOT SET")
-        if self.openrouter_key:
-            print(f"  - OpenRouter key: {self.openrouter_key[:15]}...")
-        else:
-            print(f"  - OpenRouter key: NOT SET")
+        self._provider_order = ["gemini", "groq", "openrouter", "openai", "anthropic"]
         
     def _load_keys(self, env_var: str) -> List[str]:
         keys_str = os.getenv(env_var, "")
@@ -49,18 +40,64 @@ class APIManager:
     def rotate_gemini_key(self):
         if self.gemini_keys and len(self.gemini_keys) > 1:
             self.current_gemini_index = (self.current_gemini_index + 1) % len(self.gemini_keys)
-            print(f"Rotated to Gemini key #{self.current_gemini_index + 1}")
     
     def get_active_provider(self) -> str:
         return self._active_provider
     
     def set_active_provider(self, provider: str):
         self._active_provider = provider
-    
-    async def call_gemini(self, prompt: str, history_text: str = "", timeout: float = 15.0) -> Optional[str]:
+
+    def _is_complete(self, text: str) -> bool:
+        """Check if response appears complete (not truncated mid-sentence)"""
+        if not text or len(text.strip()) < 10:
+            return False
+        
+        stripped = text.strip()
+        
+        # Ends with proper sentence/paragraph markers
+        complete_endings = ['.', '!', '?', '```', '```python', '```java', '```javascript', '```c', '```cpp']
+        if any(stripped.endswith(e) for e in complete_endings):
+            return True
+        
+        # Ends with numbered list item that has content
+        if re.search(r'\d+\.\s+.*[.!?:]$', stripped):
+            return True
+        
+        # Check for unclosed code blocks
+        code_block_count = stripped.count('```')
+        if code_block_count % 2 != 0:
+            return False
+        
+        # Check for unclosed quotes/brackets at end
+        last_100 = stripped[-100:]
+        open_brackets = last_100.count('(') - last_100.count(')')
+        open_braces = last_100.count('{') - last_100.count('}')
+        if open_brackets > 0 or open_braces > 0:
+            return False
+        
+        # Check if ends mid-word (no space/punctuation at end)
+        if stripped[-1].isalpha() and len(stripped) > 5:
+            # Likely truncated if last word is short and no punctuation
+            words = stripped.split()
+            if words and len(words[-1]) < 3:
+                return False
+        
+        # Check for common truncation patterns
+        truncation_patterns = [
+            r'\.\.\.\s*$',
+            r'and so on\.?\s*$',
+            r'etc\.?\s*$',
+            r'continue\.\.\.',
+            r'\[truncated',
+        ]
+        if any(re.search(p, stripped, re.IGNORECASE) for p in truncation_patterns):
+            return True
+        
+        return True
+
+    async def call_gemini(self, prompt: str, max_tokens: int = 8192, timeout: float = 30.0) -> Optional[str]:
         api_key = self.get_current_gemini_key()
         if not api_key:
-            print("No Gemini API key available")
             return None
             
         try:
@@ -71,9 +108,9 @@ class APIManager:
                     json={
                         "contents": [{"parts": [{"text": prompt}]}],
                         "generationConfig": {
-                            "temperature": 0.9,
-                            "maxOutputTokens": 2048,
-                            "topP": 0.95,
+                            "temperature": 0.7,
+                            "maxOutputTokens": max_tokens,
+                            "topP": 0.9,
                             "topK": 40
                         }
                     }
@@ -82,30 +119,24 @@ class APIManager:
                     data = response.json()
                     if "candidates" in data and data["candidates"]:
                         return data["candidates"][0]["content"]["parts"][0]["text"]
-                    elif "promptFeedback" in data or "error" in data:
-                        error_msg = data.get("error", {}).get("message", str(data))
-                        print(f"Gemini error response: {error_msg}")
-                        if "quota" in error_msg.lower() or "rate" in error_msg.lower():
-                            self.rotate_gemini_key()
-                            raise Exception("Gemini quota/rate limit")
+                    else:
+                        print(f"Gemini 200 but no candidates: {data}")
                         return None
                 elif response.status_code in [429, 503]:
-                    print(f"Gemini error status: {response.status_code}")
                     self.rotate_gemini_key()
-                    raise Exception(f"Gemini quota/rate limit")
+                    raise Exception("Gemini rate limit")
                 else:
-                    print(f"Gemini unexpected status: {response.status_code} - {response.text[:200]}")
-                return None
+                    print(f"Gemini error {response.status_code}: {response.text[:300]}")
+                    return None
         except Exception as e:
             err_str = str(e).lower()
             if "quota" in err_str or "429" in err_str or "503" in err_str or "rate" in err_str:
                 self.rotate_gemini_key()
-                raise Exception(f"Gemini quota/rate limit")
-            # Don't re-raise other errors, just return None to allow fallback
-            print(f"Gemini exception (returning None for fallback): {e}")
+                raise
+            print(f"Gemini exception: {e}")
             return None
     
-    async def call_groq(self, prompt: str, model: str = "llama-3.3-70b-versatile", timeout: float = 45.0) -> Optional[str]:
+    async def call_groq(self, prompt: str, max_tokens: int = 8192, timeout: float = 30.0) -> Optional[str]:
         if not self.groq_key:
             return None
         try:
@@ -113,23 +144,32 @@ class APIManager:
                 response = await client.post(
                     "https://api.groq.com/openai/v1/chat/completions",
                     headers={"Authorization": f"Bearer {self.groq_key}", "Content-Type": "application/json"},
-                    json={"model": model, "messages": [{"role": "user", "content": prompt}]}
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": max_tokens,
+                        "temperature": 0.7
+                    }
                 )
                 if response.status_code == 200:
                     data = response.json()
                     if "choices" in data and data["choices"]:
                         return data["choices"][0]["message"]["content"]
+                    print(f"Groq 200 but no choices: {data}")
                     return None
                 elif response.status_code == 429:
                     raise Exception("Groq rate limit")
                 else:
-                    print(f"Groq error {response.status_code}: {response.text[:200]}")
-                return None
+                    print(f"Groq error {response.status_code}: {response.text[:300]}")
+                    return None
         except Exception as e:
+            err_str = str(e).lower()
+            if "rate" in err_str or "429" in err_str:
+                raise
             print(f"Groq exception: {e}")
-            raise
+            return None
     
-    async def call_openrouter(self, prompt: str, model: str = "meta-llama/llama-3.3-70b-instruct", timeout: float = 45.0) -> Optional[str]:
+    async def call_openrouter(self, prompt: str, max_tokens: int = 8192, timeout: float = 30.0) -> Optional[str]:
         if not self.openrouter_key:
             return None
         try:
@@ -142,17 +182,31 @@ class APIManager:
                         "HTTP-Referer": "https://educhat.com",
                         "X-Title": "EduChat"
                     },
-                    json={"model": model, "messages": [{"role": "user", "content": prompt}]}
+                    json={
+                        "model": "meta-llama/llama-3.1-8b-instruct",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": max_tokens,
+                        "temperature": 0.7
+                    }
                 )
                 if response.status_code == 200:
-                    return response.json()["choices"][0]["message"]["content"]
+                    data = response.json()
+                    if "choices" in data and data["choices"]:
+                        return data["choices"][0]["message"]["content"]
+                    print(f"OpenRouter 200 but no choices: {data}")
+                    return None
                 elif response.status_code == 429:
                     raise Exception("OpenRouter rate limit")
-                return None
-        except:
+                else:
+                    print(f"OpenRouter error {response.status_code}: {response.text[:300]}")
+                    return None
+        except Exception as e:
+            if "rate" in str(e).lower() or "429" in str(e):
+                raise
+            print(f"OpenRouter exception: {e}")
             return None
     
-    async def call_openai(self, prompt: str, model: str = "gpt-4o-mini", timeout: float = 45.0) -> Optional[str]:
+    async def call_openai(self, prompt: str, max_tokens: int = 8192, timeout: float = 30.0) -> Optional[str]:
         if not self.openai_key:
             return None
         try:
@@ -163,17 +217,31 @@ class APIManager:
                         "Authorization": f"Bearer {self.openai_key}",
                         "Content-Type": "application/json"
                     },
-                    json={"model": model, "messages": [{"role": "user", "content": prompt}]}
+                    json={
+                        "model": "gpt-4o-mini",
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": max_tokens,
+                        "temperature": 0.7
+                    }
                 )
                 if response.status_code == 200:
-                    return response.json()["choices"][0]["message"]["content"]
+                    data = response.json()
+                    if "choices" in data and data["choices"]:
+                        return data["choices"][0]["message"]["content"]
+                    print(f"OpenAI 200 but no choices: {data}")
+                    return None
                 elif response.status_code == 429:
                     raise Exception("OpenAI rate limit")
-                return None
-        except:
+                else:
+                    print(f"OpenAI error {response.status_code}: {response.text[:300]}")
+                    return None
+        except Exception as e:
+            if "rate" in str(e).lower() or "429" in str(e):
+                raise
+            print(f"OpenAI exception: {e}")
             return None
     
-    async def call_anthropic(self, prompt: str, model: str = "claude-3-haiku-20240307", timeout: float = 45.0) -> Optional[str]:
+    async def call_anthropic(self, prompt: str, max_tokens: int = 8192, timeout: float = 30.0) -> Optional[str]:
         if not self.anthropic_key:
             return None
         try:
@@ -185,86 +253,158 @@ class APIManager:
                         "anthropic-version": "2023-06-01",
                         "Content-Type": "application/json"
                     },
-                    json={"model": model, "max_tokens": 2048, "messages": [{"role": "user", "content": prompt}]}
+                    json={
+                        "model": "claude-3-haiku-20240307",
+                        "max_tokens": max_tokens,
+                        "messages": [{"role": "user", "content": prompt}]
+                    }
                 )
                 if response.status_code == 200:
-                    return response.json()["content"][0]["text"]
+                    data = response.json()
+                    if "content" in data and data["content"]:
+                        return data["content"][0]["text"]
+                    print(f"Anthropic 200 but no content: {data}")
+                    return None
                 elif response.status_code == 429:
                     raise Exception("Anthropic rate limit")
-                return None
-        except:
+                else:
+                    print(f"Anthropic error {response.status_code}: {response.text[:300]}")
+                    return None
+        except Exception as e:
+            if "rate" in str(e).lower() or "429" in str(e):
+                raise
+            print(f"Anthropic exception: {e}")
             return None
-    
-    async def call_with_fallback(self, prompt: str, history_text: str = "") -> str:
-        print(f"call_with_fallback - Gemini keys: {len(self.gemini_keys)}, Groq key: {'set' if self.groq_key else 'not set'}")
-        
-        # Try Gemini
-        if self.gemini_keys:
-            try:
-                print("Trying Gemini...")
-                result = await self.call_gemini(prompt, history_text, timeout=20.0)
+
+    async def _call_provider(self, provider: str, prompt: str, max_tokens: int) -> Tuple[Optional[str], bool]:
+        """Call a specific provider. Returns (response, rate_limited)"""
+        try:
+            if provider == "gemini":
+                result = await self.call_gemini(prompt, max_tokens)
                 if result:
-                    self.set_active_provider("gemini")
-                    print("Success with Gemini")
-                    return result
-                print("Gemini returned None")
-            except Exception as e:
-                print(f"Gemini exception: {e}")
-        
-        # Try Groq
-        if self.groq_key:
-            try:
-                print("Trying Groq...")
-                result = await self.call_groq(prompt)
+                    print(f"OK: Gemini ({len(result)} chars)")
+                else:
+                    print(f"WARN: Gemini returned None")
+                return result, False
+            elif provider == "groq":
+                result = await self.call_groq(prompt, max_tokens)
                 if result:
-                    self.set_active_provider("groq")
-                    print("Success with Groq")
-                    return result
-                print("Groq returned None")
-            except Exception as e:
-                print(f"Groq exception: {e}")
-        
-        # Try OpenRouter
-        if self.openrouter_key:
-            try:
-                print("Trying OpenRouter...")
-                result = await self.call_openrouter(prompt)
+                    print(f"OK: Groq ({len(result)} chars)")
+                else:
+                    print(f"WARN: Groq returned None")
+                return result, False
+            elif provider == "openrouter":
+                result = await self.call_openrouter(prompt, max_tokens)
                 if result:
-                    self.set_active_provider("openrouter")
-                    print("Success with OpenRouter")
-                    return result
-                print("OpenRouter returned None")
-            except Exception as e:
-                print(f"OpenRouter exception: {e}")
-        
-        # Try OpenAI
-        if self.openai_key:
-            try:
-                print("Trying OpenAI...")
-                result = await self.call_openai(prompt)
+                    print(f"OK: OpenRouter ({len(result)} chars)")
+                else:
+                    print(f"WARN: OpenRouter returned None")
+                return result, False
+            elif provider == "openai":
+                result = await self.call_openai(prompt, max_tokens)
                 if result:
-                    self.set_active_provider("openai")
-                    print("Success with OpenAI")
-                    return result
-                print("OpenAI returned None")
-            except Exception as e:
-                print(f"OpenAI exception: {e}")
-        
-        # Try Anthropic
-        if self.anthropic_key:
-            try:
-                print("Trying Anthropic...")
-                result = await self.call_anthropic(prompt)
+                    print(f"OK: OpenAI ({len(result)} chars)")
+                else:
+                    print(f"WARN: OpenAI returned None")
+                return result, False
+            elif provider == "anthropic":
+                result = await self.call_anthropic(prompt, max_tokens)
                 if result:
-                    self.set_active_provider("anthropic")
-                    print("Success with Anthropic")
-                    return result
-                print("Anthropic returned None")
-            except Exception as e:
-                print(f"Anthropic exception: {e}")
+                    print(f"OK: Anthropic ({len(result)} chars)")
+                else:
+                    print(f"WARN: Anthropic returned None")
+                return result, False
+        except Exception as e:
+            err_str = str(e).lower()
+            if "rate" in err_str or "429" in err_str or "quota" in err_str:
+                print(f"RATE LIMIT: {provider}")
+                return None, True
+            print(f"ERROR: {provider} - {e}")
+            return None, False
+        return None, False
+
+    async def call_with_fallback(self, prompt: str, history_text: str = "", max_tokens: int = 8192) -> str:
+        """Call providers with fallback AND continuation for incomplete answers"""
+        full_answer = ""
+        providers_tried = set()
+        max_continuations = 3
         
-        print("All API providers failed")
-        return "I apologize, but I'm experiencing technical difficulties. Please try again in a moment."
+        for attempt in range(max_continuations + 1):
+            result = None
+            rate_limited_provider = None
+            
+            print(f"--- Attempt {attempt + 1}, providers tried: {providers_tried} ---")
+            
+            # Try each provider in order, skipping already tried ones
+            for provider in self._provider_order:
+                if provider in providers_tried:
+                    continue
+                    
+                # Skip providers without keys
+                if provider == "gemini" and not self.gemini_keys:
+                    print(f"SKIP: {provider} (no keys)")
+                    continue
+                if provider == "groq" and not self.groq_key:
+                    print(f"SKIP: {provider} (no key)")
+                    continue
+                if provider == "openrouter" and not self.openrouter_key:
+                    print(f"SKIP: {provider} (no key)")
+                    continue
+                if provider == "openai" and not self.openai_key:
+                    print(f"SKIP: {provider} (no key)")
+                    continue
+                if provider == "anthropic" and not self.anthropic_key:
+                    print(f"SKIP: {provider} (no key)")
+                    continue
+                
+                current_prompt = prompt
+                if attempt > 0 and full_answer:
+                    # Get the last numbered item from the response
+                    import re
+                    numbers = re.findall(r'^(\d+)\.', full_answer.split('\n')[-10:], re.MULTILINE)
+                    next_num = int(numbers[-1]) + 1 if numbers else 0
+                    last_200 = full_answer[-200:]
+                    current_prompt = f"""Continue numbered list from item {next_num}. Do NOT repeat previous items. Do NOT restart at 1.
+
+Last item done:
+{last_200}
+
+Start with {next_num}. """
+                    print(f"CONTINUATION: Asking {provider} to continue...")
+                else:
+                    print(f"TRYING: {provider}")
+                
+                result, was_rate_limited = await self._call_provider(provider, current_prompt, max_tokens)
+                providers_tried.add(provider)
+                
+                if was_rate_limited:
+                    rate_limited_provider = provider
+                    continue
+                
+                if result:
+                    self.set_active_provider(provider)
+                    break
+            
+            if not result:
+                if full_answer:
+                    print(f"Returning partial answer ({len(full_answer)} chars)")
+                    return full_answer
+                print(f"ALL PROVIDERS FAILED")
+                return "I'm having technical issues. Please try again."
+            
+            full_answer += result
+            
+            # Check if answer is complete
+            if self._is_complete(full_answer):
+                print(f"Answer complete ({len(full_answer)} chars)")
+                break
+            
+            print(f"Answer incomplete, trying continuation...")
+            # If incomplete, try next provider for continuation
+            if rate_limited_provider:
+                providers_tried.discard(rate_limited_provider)
+        
+        return full_answer
 
 _api_manager = None
 

@@ -1,4 +1,5 @@
 import os
+import re
 import json
 from typing import List, Dict, Any
 from pathlib import Path
@@ -25,8 +26,7 @@ def extract_file_content(files: List[Dict[str, Any]]) -> str:
         file_data = file.get("data", "")
         
         if file_type == "text":
-            content_parts.append(f"--- File: {file_name} ---\n{file_data[:10000]}\n")
-        
+            content_parts.append(f"--- {file_name} ---\n{file_data[:8000]}\n")
         elif file_type == "pdf":
             try:
                 import base64
@@ -42,18 +42,15 @@ def extract_file_content(files: List[Dict[str, Any]]) -> str:
                     text += page.extract_text() or ""
                 
                 if text.strip():
-                    content_parts.append(f"--- PDF: {file_name} ---\n{text[:15000]}\n")
+                    content_parts.append(f"--- {file_name} ---\n{text[:10000]}\n")
                 else:
-                    content_parts.append(f"--- PDF: {file_name} ---\n[PDF contains no extractable text or is scanned]\n")
+                    content_parts.append(f"--- {file_name} ---\n[No extractable text]\n")
             except Exception as e:
-                content_parts.append(f"--- PDF: {file_name} ---\n[Error reading PDF: {str(e)}]\n")
-        
+                content_parts.append(f"--- {file_name} ---\n[Error: {str(e)}]\n")
         elif file_type == "image":
-            content_parts.append(f"--- Image: {file_name} ---\n[Image uploaded - describe what you see in the image]\n")
-        
+            content_parts.append(f"--- {file_name} ---\n[Image uploaded]\n")
         elif file_type == "audio":
-            content_parts.append(f"--- Audio: {file_name} ---\n[Audio file uploaded - for detailed transcription, please use a specialized audio model]\n")
-        
+            content_parts.append(f"--- {file_name} ---\n[Audio uploaded]\n")
         elif file_type == "doc":
             try:
                 import base64
@@ -64,21 +61,81 @@ def extract_file_content(files: List[Dict[str, Any]]) -> str:
                 doc_file = BytesIO(doc_bytes)
                 doc = Document(doc_file)
                 
-                text = ""
-                for para in doc.paragraphs:
-                    text += para.text + "\n"
-                
+                text = "\n".join([p.text for p in doc.paragraphs])
                 if text.strip():
-                    content_parts.append(f"--- Word Document: {file_name} ---\n{text[:15000]}\n")
+                    content_parts.append(f"--- {file_name} ---\n{text[:10000]}\n")
                 else:
-                    content_parts.append(f"--- Word Document: {file_name} ---\n[Document appears to be empty]\n")
+                    content_parts.append(f"--- {file_name} ---\n[Empty document]\n")
             except Exception as e:
-                content_parts.append(f"--- Document: {file_name} ---\n[Error reading Word document: {str(e)}]\n")
-        
+                content_parts.append(f"--- {file_name} ---\n[Error: {str(e)}]\n")
         elif file_type == "pptx":
-            content_parts.append(f"--- Presentation: {file_name} ---\n[PowerPoint uploaded - for full extraction, please convert to PDF]\n")
+            content_parts.append(f"--- {file_name} ---\n[PowerPoint uploaded]\n")
     
     return "\n".join(content_parts)
+
+
+def classify_query(message: str) -> tuple:
+    msg = message.lower().strip()
+    
+    list_match = re.search(r'(?:\b(?:give|list|provide|show|write|tell|name|suggest|recommend|share|create|generate)\s+(?:me\s+)?(?:the\s+)?(\d+)\s+|(?:top|best|most\s+asked|most\s+common|most\s+popular|most\s+important|frequently\s+asked|common)\s+(\d+)\s+)', msg)
+    if list_match:
+        count = int(list_match.group(1) or list_match.group(2))
+        return ("list", count)
+    
+    if any(w in msg for w in ["what is", "define", "explain", "describe", "how does", "why"]):
+        return ("explain", 0)
+    
+    if any(w in msg for w in ["code", "function", "program", "script", "write a", "implement"]):
+        return ("code", 0)
+    
+    if any(w in msg for w in ["compare", "difference between", "vs", "versus"]):
+        return ("compare", 0)
+    
+    if any(w in msg for w in ["summarize", "summary", "brief", "short"]):
+        return ("summarize", 0)
+    
+    if len(msg.split()) <= 5:
+        return ("short", 0)
+    
+    return ("general", 0)
+
+
+def build_prompt(message: str, history_text: str, extracted_content: str) -> tuple:
+    query_type, list_count = classify_query(message)
+    
+    parts = []
+    
+    if extracted_content:
+        parts.append(f"Document: {extracted_content[:8000]}")
+    
+    if history_text:
+        parts.append(f"History: {history_text}")
+    
+    parts.append(f"Q: {message}")
+    
+    if query_type == "list":
+        parts.append(f"Rules: Output exactly {list_count} items in this structured format:\n**Q.1 [question]?**\nAnswer: [concise answer with `keywords` in inline code]\n\n**Q.2 [question]?**\nAnswer: [concise answer with `keywords` in inline code]\n\n(continue up to Q.{list_count})\nStrictly keep Q and Answer on separate lines. Use bold for questions, inline code for technical terms. No intro/outro. Make answers complete and informative.")
+        max_tokens = 4096
+    elif query_type == "explain":
+        parts.append("Rules: Direct answer first. Clear explanation with examples if helpful. Use bullets for multiple points.")
+        max_tokens = 1500
+    elif query_type == "code":
+        parts.append("Rules: Show code first. Brief explanation after. No preamble.")
+        max_tokens = 2048
+    elif query_type == "compare":
+        parts.append("Rules: Use comparison table or bullets. Highlight key differences. No intro.")
+        max_tokens = 1200
+    elif query_type == "summarize":
+        parts.append("Rules: Clear summary. Key points with brief explanations.")
+        max_tokens = 1000
+    elif query_type == "short":
+        parts.append("Rules: 1-2 sentence direct answer.")
+        max_tokens = 300
+    else:
+        parts.append("Rules: Complete, helpful answer. Direct first. Bullets for lists. No filler.")
+        max_tokens = 2048
+    
+    return "\n".join(parts), max_tokens
 
 
 async def process_multimodal_query(message: str, user: str, files: List[Dict[str, Any]]) -> str:
@@ -88,160 +145,31 @@ async def process_multimodal_query(message: str, user: str, files: List[Dict[str
         conversation_history[user] = []
     
     history = conversation_history[user]
-    chat_messages = history[-5:]
+    chat_messages = history[-6:]
     
     history_text = ""
     if chat_messages:
-        history_text = "\n".join([f"User: {m['user']}\nBot: {m['bot']}" for m in chat_messages])
+        history_text = "\n".join([f"U: {m['user'][:300]}\nA: {m['bot'][:500]}" for m in chat_messages])
     
     extracted_content = ""
     if files and len(files) > 0:
         extracted_content = extract_file_content(files)
     
-    prompt = """You are EduChat, a friendly and helpful AI tutor. Provide CONCISE and MEDIUM-length educational responses.
-    """
-    
-    if extracted_content:
-        prompt += f"""
-DOCUMENT CONTENT:
-{extracted_content}
-
-"""
-    
-    if history_text:
-        prompt += f"""CONVERSATION HISTORY:
-{history_text}
-
-"""
-    
     has_format_override = "STRICT REQUIREMENT" in message
     
-    prompt += f"""User question: {message}
-
-"""
     if has_format_override:
-        prompt += """Follow the formatting instructions given in the user question EXACTLY. Do not add paragraphs, preambles, introductions, or conversational filler.
-
-Answer:"""
+        prompt = f"Q: {message}\nRules: Follow instructions exactly. No filler."
+        max_tokens = 1500
     else:
-        prompt += """Keep your response:
-- Concise (2-4 paragraphs max)
-- Use bullet points for lists (max 5 items)
-- Include code examples only if essential
-- Skip elaborate headings
-
-Answer:"""
+        prompt, max_tokens = build_prompt(message, history_text, extracted_content)
     
-    answer = await api_manager.call_with_fallback(prompt, history_text)
+    answer = await api_manager.call_with_fallback(prompt, history_text, max_tokens)
     
     history.append({"user": message, "bot": answer})
-    conversation_history[user] = history
+    conversation_history[user] = history[-20:]
     
     return answer
 
-
-def generate_mock_response(message: str, user: str, files: List[Dict[str, Any]]) -> str:
-    message_lower = message.lower()
-    
-    if files:
-        file_info = f"I received {len(files)} file(s): "
-        file_info += ", ".join([f["name"] for f in files])
-        
-        if any(f["type"] == "image" for f in files):
-            file_info += ". I can see the image you've uploaded."
-        elif any(f["type"] == "audio" for f in files):
-            file_info += ". I've processed the audio file."
-        elif any(f["type"] == "pdf" for f in files):
-            file_info += ". I've analyzed the PDF content."
-    else:
-        file_info = ""
-    
-    educational_responses = {
-        "tree": f"""{file_info}
-
-Great question about trees! Here's an explanation of Binary Search Trees:
-
-A **Binary Search Tree (BST)** is a hierarchical data structure where:
-- Each node has at most two children (left and right)
-- Left child contains values smaller than the parent
-- Right child contains values larger than the parent
-
-This property makes search operations efficient - O(log n) on average.
-
-**Key Operations:**
-- **Search**: Compare target with node, go left or right accordingly
-- **Insert**: Find correct position, add new leaf
-- **Delete**: Three cases - no children, one child, or two children
-
-Would you like me to show code examples for any of these operations?""",
-        
-        "graph": f"""{file_info}
-
-Excellent question about graphs! Let me explain:
-
-A **Graph** consists of:
-- **Vertices (V)**: Nodes representing entities
-- **Edges (E)**: Connections between vertices
-
-**Types:**
-- **Directed** vs Undirected
-- **Weighted** vs Unweighted
-- **Cyclic** vs Acyclic
-
-**Common Representations:**
-- Adjacency Matrix
-- Adjacency List
-
-**Key Algorithms:**
-- BFS (Breadth-First Search) - Level by level traversal
-- DFS (Depth-First Search) - Go deep before backtracking
-- Dijkstra's Algorithm - Shortest path in weighted graphs
-
-Which specific graph topic would you like to explore further?""",
-        
-        "algorithm": f"""{file_info}
-
-Algorithms are fundamental to computer science! Here are key concepts:
-
-**Time Complexity (Big O):**
-- O(1) - Constant
-- O(log n) - Logarithmic  
-- O(n) - Linear
-- O(n log n) - Linearithmic
-- O(n²) - Quadratic
-
-**Space Complexity:**
-- How much memory the algorithm needs
-
-**Common Patterns:**
-- Divide and Conquer
-- Dynamic Programming
-- Greedy Algorithms
-- Backtracking
-
-What specific algorithm or concept would you like to learn about?""",
-        
-        "default": f"""{file_info}
-
-Thanks for your message! I'm EduChat, your AI tutor.
-
-I can help you with:
-- **Data Structures**: Trees, Graphs, Arrays, Linked Lists, etc.
-- **Algorithms**: Sorting, Searching, Dynamic Programming
-- **Concept Explanation**: Any CS topic you're studying
-- **Code Review**: Analyzing your code
-- **Practice Problems**: Generating exercises
-
-{get_encouragement()}
-
-What would you like to learn about today?"""
-    }
-    
-    for key in educational_responses:
-        if key in message_lower and key != "default":
-            return educational_responses[key]
-    
-    return educational_responses["default"]
 
 def get_encouragement():
     encouragements = [
@@ -278,7 +206,7 @@ class DocumentProcessor:
             
             return DocumentProcessor.process_text(text)
         except Exception as e:
-            return [f"Error processing PDF: str(e)"]
+            return [f"Error processing PDF: {str(e)}"]
     
     @staticmethod
     def summarize_text(text: str, max_words: int = 100) -> str:

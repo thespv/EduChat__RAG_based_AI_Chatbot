@@ -55,7 +55,7 @@ def get_fallback_llm():
     elif api_manager.openrouter_key:
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(
-            model="meta-llama/llama-3.3-70b-instruct",
+            model="meta-llama/llama-3.1-8b-instruct",
             api_key=api_manager.openrouter_key,
             base_url="https://openrouter.ai/api/v1"
         )
@@ -236,13 +236,11 @@ async def process_rag_query(
     memory.add_message("user", message)
     
     context = ""
-    print(f"RAG DEBUG: Processing {len(files) if files else 0} files")
     if files and len(files) > 0:
         for file in files:
             file_type = file.get("type", "")
             file_data = file.get("data", "")
             file_name = file.get("name", "document")
-            print(f"RAG DEBUG: File type={file_type}, name={file_name}, data_len={len(file_data) if file_data else 0}")
             
             import base64
             from io import BytesIO
@@ -250,47 +248,27 @@ async def process_rag_query(
             if file_type in ("text", "pdf", "doc", "pptx"):
                 try:
                     text_data = file_data if file_data else file.get("data", "")
-                    
-                    print(f"RAG DEBUG: Processing {file_type} {file_name}, text_len={len(text_data) if text_data else 0}")
-                    print(f"RAG DEBUG: Sample text: {repr(text_data[:200])}")
-                    
                     if text_data and len(text_data) > 10:
                         context = text_data
-                        print(f"RAG DEBUG: Using full extracted text directly")
                 except Exception as e:
                     print(f"Error processing document: {e}")
     
     history = memory.get_conversation_history()
     
     if context:
-        system_msg = f"""You are EduChat, an AI tutor. A document has been uploaded. Use the following document content to answer the user's question:
+        system_msg = f"""You are EduChat, an AI tutor. Answer using ONLY this document:
 
-DOCUMENT CONTENT:
-{context}
+{context[:6000]}
 
-Provide a detailed answer based on the document content above. Be helpful and educational."""
+Be concise. Answer directly."""
     else:
-        system_msg = """You are EduChat, an AI tutor specialized in helping students learn.
-Provide helpful, educational responses. Use conversation history for context."""
+        system_msg = """You are EduChat, an AI tutor. Give concise, helpful answers."""
     
-    if context:
-        full_prompt = f"""{system_msg}
+    full_prompt = f"""{system_msg}
 
-CONVERSATION HISTORY:
-{history}
+Q: {message}
 
-User Question: {message}
-
-Answer:"""
-    else:
-        full_prompt = f"""{system_msg}
-
-CONVERSATION HISTORY:
-{history}
-
-User Question: {message}
-
-Answer:"""
+A:"""
     
     try:
         answer = await api_manager.call_with_fallback(full_prompt, "")
@@ -316,34 +294,14 @@ async def generate_quiz_with_rag(
     memory = get_chat_memory(user, session_id)
     history = memory.get_conversation_history()
     
-    prompt_text = f"""You are an expert quiz generator. Create a {difficulty} quiz with {num_questions} multiple choice questions about the given topic.
-Format each question as:
-Q1) [question]
-A) [option1]
-B) [option2]  
-C) [option3]
-D) [option4]
-Answer: [correct answer letter]
-
-Provide educational questions that test understanding, not just memorization.
-
-Topic: {topic}
-
-Generate the quiz now."""
+    prompt_text = f"""Create {num_questions} {difficulty} MCQs about: {topic}
+Format: Q1) question\nA) opt\nB) opt\nC) opt\nD) opt\nAnswer: letter
+No intro/outro. Start with Q1."""
 
     try:
         llm = get_langchain_llm()
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"""You are an expert quiz generator. Create a {difficulty} quiz with {num_questions} multiple choice questions about the given topic.
-Format each question as:
-Q1) [question]
-A) [option1]
-B) [option2]  
-C) [option3]
-D) [option4]
-Answer: [correct answer letter]
-
-Provide educational questions that test understanding, not just memorization."""),
+            ("system", f"Create {num_questions} {difficulty} MCQs about: {{topic}}. Format: Q1) question\nA) opt\nB) opt\nC) opt\nD) opt\nAnswer: letter. No intro/outro."),
             ("human", "Topic: {topic}")
         ])
         
@@ -368,26 +326,14 @@ async def generate_flashcards_with_rag(
     
     api_manager = get_api_manager()
     
-    prompt_text = f"""You are an expert educator. Create {num_cards} flashcards about the given topic.
-Format each card as:
-Q: [question]
-A: [answer]
-
-Make questions that test understanding. Answers should be concise but complete.
-
-Topic: {topic}
-
-Generate flashcards now."""
+    prompt_text = f"""Create {num_cards} flashcards about: {topic}
+Format: Q: question\nA: answer
+Concise. No intro/outro."""
 
     try:
         llm = get_langchain_llm()
         prompt = ChatPromptTemplate.from_messages([
-            ("system", f"""You are an expert educator. Create {num_cards} flashcards about the given topic.
-Format each card as:
-Q: [question]
-A: [answer]
-
-Make questions that test understanding. Answers should be concise but complete."""),
+            ("system", f"Create {num_cards} flashcards about: {{topic}}. Format: Q: question\nA: answer. Concise. No intro/outro."),
             ("human", "Topic: {topic}")
         ])
         

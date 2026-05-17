@@ -8,65 +8,230 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-      body { 
-        background: linear-gradient(135deg, #14284b 0%, #1e3b6e 100%); 
-        min-height: 100vh; 
-        display: flex; 
-        align-items: center; 
-        justify-content: center; 
-        margin: 0;
-        padding: 20px;
-      }
-      .auth-container { width: 100%; max-width: 400px; }
-      .auth-logo { text-align: center; margin-bottom: 32px; }
-      .auth-logo .logo-icon { font-size: 3rem; display: block; margin-bottom: 8px; }
-      .auth-logo h1 { color: white; font-size: 2rem; font-weight: 700; }
-      .auth-logo .ai-text { color: #10b981; }
-      
-      .modal-overlay { background: white; border-radius: 16px; padding: 32px; box-shadow: 0 20px 60px rgba(0,0,0,0.3); }
-      .modal-overlay h2 { text-align: center; margin-bottom: 8px; color: #20242d; font-size: 1.5rem; }
-      .modal-subtitle { text-align: center; color: #6b7280; margin-bottom: 24px; font-size: 0.9rem; }
-      
-      .form-group { margin-bottom: 16px; }
-      .form-group label { display: block; margin-bottom: 6px; color: #374151; font-weight: 500; font-size: 0.9rem; }
-      .form-group input { width: 100%; padding: 12px; border: 1px solid #d1d5db; border-radius: 8px; font-size: 1rem; outline: none; }
-      .form-group input:focus { border-color: #14284b; box-shadow: 0 0 0 3px rgba(20,40,75,0.1); }
-      
-      .password-hint { font-size: 0.75rem; color: #6b7280; margin-top: 4px; }
-      
-      .error-message { color: #dc2626; font-size: 0.85rem; margin-bottom: 12px; text-align: center; }
-      .success-message { color: #059669; font-size: 0.85rem; margin-bottom: 12px; text-align: center; }
-      
-      .forgot-password { text-align: right; margin-bottom: 16px; }
-      .forgot-password a { color: #10b981; text-decoration: none; font-size: 0.9rem; }
-      
-      .btn-primary { background: #14284b; color: white; border: none; padding: 14px 24px; border-radius: 8px; cursor: pointer; font-size: 1rem; font-weight: 500; width: 100%; transition: background 0.2s; }
-      .btn-primary:hover { background: #1e3b6e; }
-      .btn-primary:disabled { background: #9ca3af; cursor: not-allowed; }
-      
-      .modal-footer-text { text-align: center; margin-top: 20px; color: #6b7280; font-size: 0.9rem; }
-      .modal-footer-text a { color: #10b981; text-decoration: none; font-weight: 500; }
-      .modal-footer-text a:hover { text-decoration: underline; }
-      
-      .loading { opacity: 0.6; pointer-events: none; }
-      
-      #signup-modal, #forgot-modal, #verification-modal { display: none; }
-      
-      @media (max-width: 480px) {
-        body { padding: 15px; }
-        .modal-overlay { padding: 24px; }
-        .auth-logo h1 { font-size: 1.6rem; }
-        .auth-logo .logo-icon { font-size: 2.5rem; }
-      }
-    </style>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+    * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+    body {
+      background: #0a0a18;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      position: relative;
+      overflow-y: auto;
+      overflow-x: hidden;
+    }
+
+    /* Animated background blobs */
+    body::before, body::after {
+      content: '';
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(80px);
+      opacity: 0.35;
+      pointer-events: none;
+    }
+    body::before {
+      width: 500px; height: 500px;
+      background: radial-gradient(circle, #6c63ff 0%, transparent 70%);
+      top: -100px; left: -100px;
+      animation: blobMove1 12s ease-in-out infinite alternate;
+    }
+    body::after {
+      width: 400px; height: 400px;
+      background: radial-gradient(circle, #00d4aa 0%, transparent 70%);
+      bottom: -80px; right: -80px;
+      animation: blobMove2 10s ease-in-out infinite alternate;
+    }
+
+    @keyframes blobMove1 { from { transform: translate(0,0); } to { transform: translate(60px, 80px); } }
+    @keyframes blobMove2 { from { transform: translate(0,0); } to { transform: translate(-50px, -60px); } }
+
+    .auth-container { width: 100%; max-width: 420px; position: relative; z-index: 1; margin: auto; }
+
+    .auth-logo {
+      text-align: center;
+      margin-bottom: 32px;
+      animation: fadeDown 0.6s ease;
+    }
+    @keyframes fadeDown { from { opacity:0; transform: translateY(-20px); } to { opacity:1; transform: translateY(0); } }
+
+    .auth-logo .logo-icon {
+      font-size: 3rem;
+      display: block;
+      margin-bottom: 10px;
+      filter: drop-shadow(0 0 20px rgba(0,212,170,0.7));
+    }
+
+    .auth-logo h1 {
+      font-size: 2rem;
+      font-weight: 800;
+      background: linear-gradient(135deg, #fff 0%, #6c63ff 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      letter-spacing: -0.5px;
+    }
+
+    .auth-logo .ai-text {
+      background: linear-gradient(135deg, #00d4aa, #6c63ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .auth-logo p {
+      color: #7a7a9d;
+      font-size: 0.9rem;
+      margin-top: 6px;
+    }
+
+    .modal-overlay {
+      background: rgba(255,255,255,0.03);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid rgba(108,99,255,0.2);
+      border-radius: 20px;
+      padding: 36px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.5), 0 0 40px rgba(108,99,255,0.1);
+      animation: fadeUp 0.5s ease;
+    }
+    @keyframes fadeUp { from { opacity:0; transform: translateY(24px); } to { opacity:1; transform: translateY(0); } }
+
+    .modal-overlay h2 {
+      text-align: center;
+      color: #e8e8f8;
+      font-size: 1.6rem;
+      font-weight: 700;
+      margin-bottom: 6px;
+    }
+
+    .modal-subtitle {
+      text-align: center;
+      color: #7a7a9d;
+      margin-bottom: 28px;
+      font-size: 0.88rem;
+    }
+
+    .form-group { margin-bottom: 18px; }
+
+    .form-group label {
+      display: block;
+      margin-bottom: 7px;
+      color: #9a9abd;
+      font-weight: 500;
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+    }
+
+    .form-group input {
+      width: 100%;
+      padding: 13px 16px;
+      background: rgba(255,255,255,0.05);
+      border: 1px solid rgba(108,99,255,0.25);
+      border-radius: 12px;
+      font-size: 0.95rem;
+      color: #e8e8f8;
+      outline: none;
+      transition: all 0.2s;
+      font-family: 'Inter', sans-serif;
+    }
+
+    .form-group input:focus {
+      border-color: #6c63ff;
+      background: rgba(108,99,255,0.08);
+      box-shadow: 0 0 0 3px rgba(108,99,255,0.2);
+    }
+
+    .form-group input::placeholder { color: #4a4a6a; }
+
+    .password-hint { font-size: 0.73rem; color: #5a5a7a; margin-top: 5px; }
+
+    .error-message {
+      background: rgba(255,77,109,0.12);
+      border: 1px solid rgba(255,77,109,0.3);
+      color: #ff6b8a;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      text-align: center;
+      padding: 10px 14px;
+      border-radius: 10px;
+    }
+
+    .success-message {
+      background: rgba(0,212,170,0.1);
+      border: 1px solid rgba(0,212,170,0.3);
+      color: #00d4aa;
+      font-size: 0.85rem;
+      margin-bottom: 16px;
+      text-align: center;
+      padding: 10px 14px;
+      border-radius: 10px;
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, #6c63ff 0%, #5a52e0 100%);
+      color: white;
+      border: none;
+      padding: 14px 24px;
+      border-radius: 12px;
+      cursor: pointer;
+      font-size: 0.95rem;
+      font-weight: 600;
+      width: 100%;
+      transition: all 0.25s;
+      box-shadow: 0 4px 20px rgba(108,99,255,0.4);
+      font-family: 'Inter', sans-serif;
+      letter-spacing: 0.3px;
+    }
+
+    .btn-primary:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 30px rgba(108,99,255,0.55);
+    }
+
+    .btn-primary:disabled {
+      background: #2a2a45;
+      color: #5a5a7a;
+      cursor: not-allowed;
+      transform: none;
+      box-shadow: none;
+    }
+
+    .modal-footer-text {
+      text-align: center;
+      margin-top: 22px;
+      color: #5a5a7a;
+      font-size: 0.88rem;
+    }
+
+    .modal-footer-text a {
+      color: #6c63ff;
+      text-decoration: none;
+      font-weight: 600;
+      transition: color 0.2s;
+    }
+
+    .modal-footer-text a:hover { color: #00d4aa; }
+
+    #signup-modal, #forgot-modal, #verification-modal { display: none; }
+
+    @media (max-width: 480px) {
+      body { padding: 16px; }
+      .modal-overlay { padding: 28px 22px; }
+      .auth-logo h1 { font-size: 1.7rem; }
+    }
+  </style>
   </head>
   <body>
     <div class="auth-container">
       <div class="auth-logo">
         <div class="logo-icon">📖</div>
         <h1>EduChat <span class="ai-text">AI</span></h1>
+        <p>Your intelligent learning companion</p>
       </div>
 
       <!-- Sign In Modal (visible by default) -->

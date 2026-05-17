@@ -49,9 +49,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-print(f"Index.py - Env path: {env_path}")
-print(f"Index.py - GEMINI_KEY: {GEMINI_KEY[:20] if GEMINI_KEY else 'NOT FOUND'}")
-
 # Import services after setting environment variables
 try:
     from api.services.llm_service import process_multimodal_query
@@ -61,23 +58,18 @@ try:
         generate_flashcards_with_rag,
         get_rag_system
     )
-    print("Services loaded successfully")
 except Exception as e:
     print(f"Error loading services: {e}")
 
 # Import auth router and get_current_user
 from api.auth import router as auth_router, get_current_user as auth_get_current_user
 from slowapi.errors import RateLimitExceeded
-from fastapi import Request
-import os
 
 # Check if running locally
 DEV_MODE = not os.getenv("DATABASE_URL")
 
-# Override get_current_user for local dev mode
+# Use the real get_current_user to maintain user chat history in local dev
 def get_current_user(request: Request) -> dict:
-    if DEV_MODE:
-        return {"id": 1, "email": "local@dev", "name": "Local User", "verified": True}
     return auth_get_current_user(request)
 
 MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -287,7 +279,13 @@ async def chat_endpoint(
         
         return {"reply": result, "session_id": session_id}
         
+    except HTTPException as he:
+        raise he
     except Exception as e:
+        import traceback
+        print(f"=== CHAT ENDPOINT ERROR ===")
+        print(traceback.format_exc())
+        print(f"===========================")
         return JSONResponse({
             "error": f"Error processing request: {str(e)}"
         }, status_code=500)
@@ -302,6 +300,8 @@ async def get_chat_history(request: Request):
         user = get_current_user(request)
         sessions = db_get_sessions(user["id"])
         return {"sessions": sessions}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         import traceback
         print(f"Error in get_chat_history: {e}")
@@ -316,6 +316,8 @@ async def get_chat_session(request: Request, session_id: int):
         if not session:
             return JSONResponse({"error": "Session not found"}, status_code=404)
         return session
+    except HTTPException as he:
+        raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -327,6 +329,8 @@ async def create_chat_session(request: Request, title: str = Form(default="New C
         session_id = db_create_session(user["id"], title)
         print(f"Session created with ID: {session_id}")
         return {"session_id": session_id, "title": title}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         print(f"Error creating session: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -335,8 +339,10 @@ async def create_chat_session(request: Request, title: str = Form(default="New C
 async def update_chat_session(request: Request, session_id: int, title: str = Form(...)):
     try:
         user = get_current_user(request)
-        update_session_title(session_id, title, user["id"])
+        update_session_title(session_id, user["id"], title)
         return {"success": True}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -346,6 +352,8 @@ async def delete_chat_session(request: Request, session_id: int):
         user = get_current_user(request)
         delete_session(session_id, user["id"])
         return {"success": True}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -448,6 +456,8 @@ async def get_notes(request: Request):
         user = get_current_user(request)
         notes = get_lecture_notes(user["email"])
         return {"notes": notes}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -596,6 +606,8 @@ async def save_note(
         user = get_current_user(request)
         note_id = save_lecture_note(user["email"], name, content, file_type)
         return {"success": True, "note_id": note_id}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -634,6 +646,8 @@ async def generate_quiz(
             result = response.content if hasattr(response, 'content') else str(response)
         
         return {"quiz": result}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -662,6 +676,8 @@ async def generate_flashcards(
             result = response.content if hasattr(response, 'content') else str(response)
         
         return {"flashcards": result}
+    except HTTPException as he:
+        raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
@@ -706,6 +722,16 @@ async def search_documents(
         return {"results": results}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.on_event("startup")
+async def startup_event():
+    print("Pre-loading embeddings model on startup...")
+    try:
+        from api.services.langchain_service import get_embeddings
+        get_embeddings()
+        print("Embeddings model loaded successfully!")
+    except Exception as e:
+        print(f"Failed to load embeddings on startup: {e}")
 
 # Serve static frontend files (for production deployment)
 dist_path = Path(__file__).parent.parent / "dist"
