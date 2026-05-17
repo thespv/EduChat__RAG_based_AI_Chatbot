@@ -514,8 +514,8 @@ document.querySelector('#app').innerHTML = `
                 <div style="padding: 16px 20px; border-top: 1px solid var(--border-color); border-bottom: 1px solid var(--border-color);">
                     <h3 style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-muted); letter-spacing: 1px; margin-bottom: 12px;">Study Tools</h3>
                     <div style="display: flex; flex-direction: column; gap: 4px;">
-                        <li class="menu-item" data-action="lecture-notes" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-dark); border-radius: 6px;"><span class="menu-icon">📄</span> <span style="font-size: 0.9rem;">Lecture Notes</span></li>
-                        <li class="menu-item" data-action="flashcards" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-dark); border-radius: 6px;"><span class="menu-icon">🗃️</span> <span style="font-size: 0.9rem;">Flashcards</span></li>
+                        <li class="menu-item" data-action="lecture-notes" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; border-radius: 6px;"><span class="menu-icon">📄</span> <span style="font-size: 0.9rem;">Lecture Notes</span></li>
+                        <li class="menu-item" data-action="flashcards" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; border-radius: 6px;"><span class="menu-icon">🗃️</span> <span style="font-size: 0.9rem;">Flashcards</span></li>
                         <li class="menu-item" data-action="study-plans" style="padding: 8px 12px; display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text-dark); border-radius: 6px;"><span class="menu-icon">📅</span> <span style="font-size: 0.9rem;">Study Plans</span></li>
                     </div>
                 </div>
@@ -1101,7 +1101,7 @@ function loadLectureNotes() {
         <div class="notes-content" style="min-height: 200px;">
             <div class="upload-area" id="notes-upload-area" style="text-align: center; border: 2px dashed #cbd5e1; padding: 20px; border-radius: 8px; margin-bottom: 20px; cursor: pointer; transition: all 0.2s;">
                 <input type="file" id="notes-file-input" accept=".txt,.pdf,.md,.doc,.docx,.ppt,.pptx" hidden>
-                <label for="notes-file-input" class="upload-label" style="cursor: pointer; display: block; color: #64748b;">
+                <label for="notes-file-input" class="upload-label" style="cursor: pointer; display: block; color: #ffffff;">
                     <div style="font-size: 24px; margin-bottom: 8px;">📄</div>
                     <span>Click to upload a document (PDF, Word, PowerPoint, Text)</span>
                 </label>
@@ -1341,7 +1341,8 @@ function loadFlashcards() {
         contentHtml = `
             <div class="flashcards-display">
                 ${cards.map((card, i) => `
-                    <div class="flashcard-item" onclick="this.classList.toggle('flipped')">
+                    <div class="flashcard-item" style="position: relative;">
+                        <button onclick="deleteFlashcard(${i})" style="position: absolute; top: 8px; right: 8px; background: rgba(255,77,109,0.15); border: none; border-radius: 6px; width: 28px; height: 28px; cursor: pointer; font-size: 14px; color: #ff4d6d; display: flex; align-items: center; justify-content: center; transition: all 0.2s;" onmouseover="this.style.background='rgba(255,77,109,0.3)'" onmouseout="this.style.background='rgba(255,77,109,0.15)'" title="Delete card">✕</button>
                         <div class="flashcard-number">Card ${i + 1}</div>
                         <div class="flashcard-q">${card.question}</div>
                         <div class="flashcard-a">${card.answer}</div>
@@ -1353,6 +1354,15 @@ function loadFlashcards() {
     
     showToolModal('Saved Flashcards', contentHtml);
 }
+
+window.deleteFlashcard = function(index) {
+    const cards = JSON.parse(localStorage.getItem('flashcards') || '[]');
+    if (index < 0 || index >= cards.length) return;
+    cards.splice(index, 1);
+    localStorage.setItem('flashcards', JSON.stringify(cards));
+    loadFlashcards();
+    showToast('Flashcard deleted!', 'success');
+};
 
 function loadStudyPlans() {
     showToolModal('Create Study Plan', `

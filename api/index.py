@@ -252,16 +252,16 @@ async def chat_endpoint(
                         "data": content.decode("utf-8", errors="ignore")[:1000]
                     })
         
-        # Use LangChain RAG if files attached, otherwise use regular LLM
-        if processed_files:
-            # RAG mode with document context
+        # Use LangChain RAG if files attached OR continuing an existing session
+        if processed_files or session_id:
+            # RAG mode with document context and session memory
             try:
                 result = await process_rag_query(message, user_email, processed_files, session_id or 0)
             except Exception as e:
                 print(f"RAG error, falling back to regular LLM: {e}")
                 result = await process_multimodal_query(message, user_email, processed_files)
         else:
-            # Regular LLM mode
+            # Regular LLM mode (no session, no files)
             result = await process_multimodal_query(message, user_email, processed_files)
         
         if save_history:

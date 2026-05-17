@@ -1158,7 +1158,7 @@ body {
 
 .tool-intro {
   margin-bottom: 16px;
-  color: var(--text-muted);
+  color: #ffffff;
 }
 
 .tool-input-group {
@@ -1182,7 +1182,7 @@ body {
 .tool-loading {
   text-align: center;
   padding: 24px;
-  color: var(--text-muted);
+  color: #ffffff;
 }
 
 .tool-modal-body .btn-primary,
@@ -1493,6 +1493,21 @@ body {
   background: #b91c1c;
 }
 
+/* Menu items - sidebar study tools */
+aside.left-sidebar .menu-item {
+  color: #ffffff !important;
+  transition: background 0.2s, color 0.2s;
+}
+
+aside.left-sidebar .menu-item:hover {
+  background: var(--bg-sidebar-hover) !important;
+}
+
+aside.left-sidebar .menu-item[data-action="lecture-notes"]:hover {
+  color: #000000 !important;
+  background: #ffffff !important;
+}
+
 /* Coming Soon Modal */
 .coming-soon {
   text-align: center;
@@ -1569,7 +1584,7 @@ body {
 }
 
 .empty-message {
-  color: var(--text-muted);
+  color: #ffffff;
   text-align: center;
   padding: 16px;
   font-style: italic;
@@ -1659,6 +1674,7 @@ body {
 .upload-label:hover {
   border-color: var(--gold-accent);
   background: #f0fdf4;
+  color: #000000 !important;
 }
 
 .upload-icon {
@@ -3337,7 +3353,23 @@ body {
 .tool-modal-body .tool-loading,
 .tool-modal-body p,
 .tool-modal-body label {
-  color: #1f2937 !important;
+  color: #ffffff !important;
+}
+
+.tool-modal-body .note-content,
+.tool-modal-body .note-content p,
+.tool-modal-body .note-content span,
+.tool-modal-body .note-content div,
+.tool-modal-body .page-content,
+.tool-modal-body #note-content-area,
+.tool-modal-body #note-content-area p,
+.tool-modal-body #note-content-area span,
+.tool-modal-body #note-content-area div,
+.tool-modal-body .note-viewer,
+.tool-modal-body .note-viewer p,
+.tool-modal-body .note-viewer span,
+.tool-modal-body .note-viewer div {
+  color: #000000 !important;
 }
 
 .coming-soon,
@@ -3350,7 +3382,7 @@ body {
 .upload-hint,
 .file-preview-item,
 .note-item {
-  color: #1f2937 !important;
+  color: #ffffff !important;
 }
 
 .flashcard-a,

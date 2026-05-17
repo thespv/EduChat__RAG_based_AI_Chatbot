@@ -92,6 +92,7 @@ class ChatMemoryManager:
         self.session_id = session_id
         self.max_messages = max_messages
         self.messages: List[Dict] = []
+        self.document_context: str = ""
     
     def add_message(self, role: str, content: str):
         """Add message to memory"""
@@ -111,9 +112,18 @@ class ChatMemoryManager:
             history.append(f"{role}: {msg['content']}")
         return "\n".join(history)
     
+    def set_document_context(self, context: str):
+        """Store document context in memory"""
+        self.document_context = context
+    
+    def get_document_context(self) -> str:
+        """Get stored document context"""
+        return self.document_context
+    
     def clear(self):
         """Clear memory"""
         self.messages = []
+        self.document_context = ""
 
 
 def get_chat_memory(user: str, session_id: int) -> ChatMemoryManager:
@@ -235,8 +245,8 @@ async def process_rag_query(
     memory = get_chat_memory(user, session_id)
     memory.add_message("user", message)
     
-    context = ""
     if files and len(files) > 0:
+        context = ""
         for file in files:
             file_type = file.get("type", "")
             file_data = file.get("data", "")
@@ -252,26 +262,40 @@ async def process_rag_query(
                         context = text_data
                 except Exception as e:
                     print(f"Error processing document: {e}")
+        
+        if context:
+            memory.set_document_context(context)
     
+    stored_context = memory.get_document_context()
     history = memory.get_conversation_history()
     
-    if context:
+    if stored_context:
         system_msg = f"""You are EduChat, an AI tutor. Answer using ONLY this document:
 
-{context[:6000]}
+{stored_context[:6000]}
 
 Be concise. Answer directly."""
     else:
         system_msg = """You are EduChat, an AI tutor. Give concise, helpful answers."""
     
-    full_prompt = f"""{system_msg}
+    if history:
+        full_prompt = f"""{system_msg}
+
+Conversation history:
+{history}
+
+Q: {message}
+
+A:"""
+    else:
+        full_prompt = f"""{system_msg}
 
 Q: {message}
 
 A:"""
     
     try:
-        answer = await api_manager.call_with_fallback(full_prompt, "")
+        answer = await api_manager.call_with_fallback(full_prompt, history)
     except Exception as e:
         print(f"Error getting response: {e}")
         answer = "I apologize, but I encountered an error processing your document. Please try again."
